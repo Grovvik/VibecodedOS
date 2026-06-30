@@ -1,0 +1,195 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <RootNamespace>Kernel</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
+  </ImportGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <TargetExt>.exe</TargetExt>
+    <GenerateManifest>false</GenerateManifest>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
+    <IntDir>$(OutDir)$(ProjectName)\</IntDir>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerCommand>wscript.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>"$(SolutionDir)debug.vbs" "$(OutDir)Boot.efi" x64</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)</LocalDebuggerWorkingDirectory>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetExt>.exe</TargetExt>
+    <GenerateManifest>false</GenerateManifest>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
+    <IntDir>$(OutDir)$(ProjectName)\</IntDir>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerCommand>wscript.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>"$(SolutionDir)debug.vbs" "$(OutDir)Boot.efi" x64</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)</LocalDebuggerWorkingDirectory>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)Shared;$(SolutionDir)Kernel;$(SolutionDir)Kernel\arch;$(SolutionDir)Kernel\mm;$(SolutionDir)Kernel\proc;$(SolutionDir)Kernel\fs;$(SolutionDir)Kernel\audio;$(SolutionDir)Kernel\loader</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_KERNEL_;_AMD64_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
+      <WarningLevel>Level3</WarningLevel>
+      <DisableSpecificWarnings>4091;4204;4210;4200;4100;4152;4206;4221;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <AdditionalOptions>/Oi- /Gs4096 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <Optimization>Disabled</Optimization>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>
+      </AdditionalDependencies>
+      <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <EntryPointSymbol>KernelEntry</EntryPointSymbol>
+      <SubSystem>Native</SubSystem>
+      <BaseAddress>0x100000</BaseAddress>
+      <FixedBaseAddress>true</FixedBaseAddress>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/MERGE:.rdata=.text /FILEALIGN:4096 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <MASM>
+      <AdditionalIncludeDirectories>$(SolutionDir)Shared</AdditionalIncludeDirectories>
+    </MASM>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)Shared;$(SolutionDir)Kernel;$(SolutionDir)Kernel\arch;$(SolutionDir)Kernel\mm;$(SolutionDir)Kernel\proc;$(SolutionDir)Kernel\fs;$(SolutionDir)Kernel\audio;$(SolutionDir)Kernel\loader</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_KERNEL_;_AMD64_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>false</ExceptionHandling>
+      <CompileAs>CompileAsC</CompileAs>
+      <WarningLevel>Level3</WarningLevel>
+      <DisableSpecificWarnings>4091;4204;4210;4200;4100;4152;4206;4221;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <AdditionalOptions>/Oi- /Gs4096 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>MinSpace</Optimization>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>
+      </AdditionalDependencies>
+      <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <EntryPointSymbol>KernelEntry</EntryPointSymbol>
+      <SubSystem>Native</SubSystem>
+      <BaseAddress>0x100000</BaseAddress>
+      <FixedBaseAddress>true</FixedBaseAddress>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <AdditionalOptions>/MERGE:.rdata=.text /FILEALIGN:4096 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <MASM>
+      <AdditionalIncludeDirectories>$(SolutionDir)Shared</AdditionalIncludeDirectories>
+    </MASM>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.c" />
+    <ClCompile Include="runtime.c" />
+    <ClCompile Include="debug.c" />
+    <ClCompile Include="hal.c" />
+    <ClCompile Include="serial.c" />
+    <ClCompile Include="framebuffer.c" />
+    <ClCompile Include="keyboard.c" />
+    <ClCompile Include="arch\gdt.c" />
+    <ClCompile Include="arch\idt.c" />
+    <ClCompile Include="arch\pic.c" />
+    <ClCompile Include="arch\pit.c" />
+    <ClCompile Include="arch\syscall.c" />
+    <ClCompile Include="mm\pmm.c" />
+    <ClCompile Include="mm\vmm.c" />
+    <ClCompile Include="mm\heap.c" />
+    <ClCompile Include="proc\process.c" />
+    <ClCompile Include="fs\ata.c" />
+    <ClCompile Include="fs\ahci.c" />
+    <ClCompile Include="fs\nvme.c" />
+    <ClCompile Include="fs\pci.c" />
+    <ClCompile Include="fs\fat32.c" />
+    <ClCompile Include="audio\hda.c" />
+    <ClCompile Include="audio\audio.c" />
+    <ClCompile Include="net\e1000.c" />
+    <ClCompile Include="net\ethernet.c" />
+    <ClCompile Include="net\arp.c" />
+    <ClCompile Include="net\ipv4.c" />
+    <ClCompile Include="net\tcp.c" />
+    <ClCompile Include="net\net.c" />
+    <ClCompile Include="loader\pe_loader.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="runtime.h" />
+    <ClInclude Include="debug.h" />
+    <ClInclude Include="hal.h" />
+    <ClInclude Include="serial.h" />
+    <ClInclude Include="framebuffer.h" />
+    <ClInclude Include="keyboard.h" />
+    <ClInclude Include="font8x16.h" />
+    <ClInclude Include="arch\gdt.h" />
+    <ClInclude Include="arch\idt.h" />
+    <ClInclude Include="arch\pic.h" />
+    <ClInclude Include="arch\pit.h" />
+    <ClInclude Include="arch\syscall.h" />
+    <ClInclude Include="mm\pmm.h" />
+    <ClInclude Include="mm\vmm.h" />
+    <ClInclude Include="mm\heap.h" />
+    <ClInclude Include="proc\process.h" />
+    <ClInclude Include="fs\ata.h" />
+    <ClInclude Include="fs\ahci.h" />
+    <ClInclude Include="fs\nvme.h" />
+    <ClInclude Include="fs\pci.h" />
+    <ClInclude Include="fs\fat32.h" />
+    <ClInclude Include="audio\hda.h" />
+    <ClInclude Include="audio\audio.h" />
+    <ClInclude Include="net\e1000.h" />
+    <ClInclude Include="net\ethernet.h" />
+    <ClInclude Include="net\arp.h" />
+    <ClInclude Include="net\ipv4.h" />
+    <ClInclude Include="net\tcp.h" />
+    <ClInclude Include="net\net.h" />
+    <ClInclude Include="loader\pe_loader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="arch\entry.asm" />
+    <MASM Include="arch\isr.asm" />
+    <MASM Include="hal_asm.asm" />
+  </ItemGroup>
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
+  </ImportGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

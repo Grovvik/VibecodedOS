@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36603.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Boot", "Boot\Boot.vcxproj", "{86BD6841-6BF3-4659-805A-DCD380CDECAD}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3135D563-9596-4584-9ED6-616ADEC52974} = {3135D563-9596-4584-9ED6-616ADEC52974}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Kernel", "Kernel\Kernel.vcxproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gnu-efi", "gnu-efi\gnu-efi.vcxproj", "{3135D563-9596-4584-9ED6-616ADEC52974}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "doomgeneric", "doomgeneric\doomgeneric\doomgeneric.vcxproj", "{95A126D2-CC94-4840-BF05-80305041B5FB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{86BD6841-6BF3-4659-805A-DCD380CDECAD}.Debug|x64.ActiveCfg = Debug|x64
+		{86BD6841-6BF3-4659-805A-DCD380CDECAD}.Debug|x64.Build.0 = Debug|x64
+		{86BD6841-6BF3-4659-805A-DCD380CDECAD}.Release|x64.ActiveCfg = Release|x64
+		{86BD6841-6BF3-4659-805A-DCD380CDECAD}.Release|x64.Build.0 = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x64.ActiveCfg = Debug|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x64.Build.0 = Debug|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.Build.0 = Release|x64
+		{3135D563-9596-4584-9ED6-616ADEC52974}.Debug|x64.ActiveCfg = Debug|x64
+		{3135D563-9596-4584-9ED6-616ADEC52974}.Debug|x64.Build.0 = Debug|x64
+		{3135D563-9596-4584-9ED6-616ADEC52974}.Release|x64.ActiveCfg = Release|x64
+		{3135D563-9596-4584-9ED6-616ADEC52974}.Release|x64.Build.0 = Release|x64
+		{95A126D2-CC94-4840-BF05-80305041B5FB}.Debug|x64.ActiveCfg = Debug|x64
+		{95A126D2-CC94-4840-BF05-80305041B5FB}.Debug|x64.Build.0 = Debug|x64
+		{95A126D2-CC94-4840-BF05-80305041B5FB}.Release|x64.ActiveCfg = Release|x64
+		{95A126D2-CC94-4840-BF05-80305041B5FB}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7F61AE94-8BA9-4D1C-9446-034F5377829A}
+	EndGlobalSection
+EndGlobal
