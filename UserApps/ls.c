@@ -11,13 +11,16 @@ void main(const char* args, const char* cwd, i32 argc) {
     }
 
     if (ac > 0) {
-        // Try to open as directory first
-        u64 rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)argv[0]);
+        char abs_path[512];
+        path_resolve(cwd, argv[0], abs_path);
+
+        // Try as directory first
+        u64 rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)abs_path);
         if (rc != 0) {
-            // Not a directory — try as a file using fopen
-            FILE* f = fopen(argv[0], "rb");
+            // Try as a file
+            FILE* f = fopen(abs_path, "rb");
             if (!f) {
-                printf("ls: cannot open '%s'\n", argv[0]);
+                printf("ls: cannot open '%s'\n", abs_path);
                 return;
             }
             fseek(f, 0, SEEK_END);
@@ -25,19 +28,14 @@ void main(const char* args, const char* cwd, i32 argc) {
             fclose(f);
 
             setcolor(FB_CYAN, FB_BLACK);
-            print("Directory listing\n");
+            print("File info:\n");
             setcolor(FB_WHITE, FB_BLACK);
-
-            const char* base_name = argv[0];
-            const char* p = argv[0];
-            while (*p) {
-                if (*p == '/' || *p == '\\') base_name = p + 1;
-                p++;
-            }
-            printf("  %s  %u\n", base_name, size);
+            printf("  %s  %u bytes\n", path_basename(abs_path), size);
             return;
         }
+        // fall through: directory is now open
     } else {
+        // No argument — list current directory
         u64 rc = syscall1(SYS_FS_OPENDIR, 0);
         if (rc != 0) {
             print("ls: cannot open directory\n");

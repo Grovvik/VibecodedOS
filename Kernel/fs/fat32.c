@@ -919,6 +919,386 @@ static void FatFreeClusterChain(u32 cluster) {
     }
 }
 
+static u8 FatComputeChecksum(const char* short_name) {
+    u8 sum = 0;
+    for (int i = 0; i < 11; i++) {
+        sum = (u8)(((sum & 1) ? 0x80 : 0) + (sum >> 1) + (u8)short_name[i]);
+    }
+    return sum;
+}
+
+static i32 FatNeedLfn(const char* name) {
+    if (RtStrCompare(name, ".") == 0 || RtStrCompare(name, "..") == 0) return 0;
+    
+    usize len = RtStrLen(name);
+    if (len > 12) return 1;
+    
+    for (usize i = 0; i < len; i++) {
+        if (name[i] >= 'a' && name[i] <= 'z') return 1;
+    }
+    
+    const char* dot = NULL;
+    for (usize i = 0; i < len; i++) {
+        if (name[i] == '.') {
+            if (dot) return 1;
+            dot = name + i;
+        }
+    }
+    
+    if (dot) {
+        usize base_len = (usize)(dot - name);
+        usize ext_len = RtStrLen(dot + 1);
+        if (base_len > 8 || ext_len > 3) return 1;
+    } else {
+        if (len > 8) return 1;
+    }
+    
+    for (usize i = 0; i < len; i++) {
+        char c = name[i];
+        if (c == ' ' || c == '+' || c == ',' || c == ';' || c == '=' || c == '[' || c == ']') {
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+
+static void FatFormatLfnEntry(u8* entry, const char* long_name, u8 seq, u8 checksum, u32 name_offset, u32 name_len) {
+    RtMemSet(entry, 0, 32);
+    entry[0] = seq;
+    entry[11] = FAT_ATTR_LFN;
+    entry[12] = 0;
+    entry[13] = checksum;
+    *(u16*)(entry + 26) = 0;
+    
+    u16 chars[13];
+    for (int i = 0; i < 13; i++) {
+        u32 char_idx = name_offset + i;
+        if (char_idx < name_len) {
+            chars[i] = (u16)(u8)long_name[char_idx];
+        } else if (char_idx == name_len) {
+            chars[i] = 0x0000;
+        } else {
+            chars[i] = 0xFFFF;
+        }
+    }
+
+    *(u16*)(entry + 1) = chars[0];
+    *(u16*)(entry + 3) = chars[1];
+    *(u16*)(entry + 5) = chars[2];
+    *(u16*)(entry + 7) = chars[3];
+    *(u16*)(entry + 9) = chars[4];
+
+    *(u16*)(entry + 14) = chars[5];
+    *(u16*)(entry + 16) = chars[6];
+    *(u16*)(entry + 18) = chars[7];
+    *(u16*)(entry + 20) = chars[8];
+    *(u16*)(entry + 22) = chars[9];
+    *(u16*)(entry + 24) = chars[10];
+
+    *(u16*)(entry + 28) = chars[11];
+    *(u16*)(entry + 30) = chars[12];
+}
+
+static ntstatus FatFindEntry(u32 dir_cluster, const char* name,
+                             u32* out_entry_sector, u32* out_entry_offset,
+                             u32* out_first_cluster, u32* out_file_size,
+                             u32* out_lfn_start_sector, u32* out_lfn_start_offset) {
+    u32 scan_cluster = dir_cluster;
+    u32 root_sec = 0;
+    u32 root_total = 0;
+
+    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+        root_sec = g_fat.root_dir_start_sector;
+        root_total = g_fat.root_dir_sectors;
+    }
+
+    char lfn_accum[260];
+    i32 lfn_valid = 0;
+    u32 lfn_start_sec = 0;
+    u32 lfn_start_off = 0;
+    RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+
+    i32 scan_done = 0;
+    while (!scan_done) {
+        u32 sector_base;
+        u32 sectors_in_group;
+
+        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+            if (root_total == 0) break;
+            sectors_in_group = root_total;
+            sector_base = root_sec;
+            scan_done = 1;
+        } else {
+            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
+            sectors_in_group = g_fat.sectors_per_cluster;
+            sector_base = FatClusterToSector(scan_cluster);
+            scan_cluster = FatNextCluster(scan_cluster);
+        }
+
+        for (u32 s = 0; s < sectors_in_group; s++) {
+            u32 current_sector = sector_base + s;
+            ntstatus status = FatReadSector(current_sector, g_sector_buf);
+            if (NT_ERROR(status)) return status;
+
+            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
+                u8 first_byte = g_sector_buf[d];
+
+                if (first_byte == 0x00) {
+                    return STATUS_NO_SUCH_FILE;
+                }
+                if (first_byte == 0xE5) {
+                    lfn_valid = 0;
+                    RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+                    continue;
+                }
+
+                u8 attr = g_sector_buf[d + 11];
+
+                if ((attr & FAT_ATTR_LFN) == FAT_ATTR_LFN) {
+                    u8 seq = g_sector_buf[d];
+                    if (seq & 0x40) {
+                        lfn_start_sec = current_sector;
+                        lfn_start_off = d;
+                        lfn_valid = 1;
+                        RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+                    }
+                    if (lfn_valid) {
+                        FatExtractLfn(g_sector_buf + d, lfn_accum, sizeof(lfn_accum));
+                    }
+                    continue;
+                }
+
+                if (attr & FAT_ATTR_VOLUME_ID) {
+                    lfn_valid = 0;
+                    RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+                    continue;
+                }
+
+                FatDirEntry entry;
+                ntstatus s2 = FatParseDirEntry(g_sector_buf + d, &entry);
+                if (s2 == STATUS_NOT_FOUND) {
+                    lfn_valid = 0;
+                    RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+                    continue;
+                }
+
+                i32 name_match = 0;
+                
+                if (lfn_valid && lfn_accum[0]) {
+                    if (RtStrCompareI(lfn_accum, name) == 0) {
+                        name_match = 1;
+                    }
+                }
+                
+                if (!name_match) {
+                    if (RtStrCompareI(entry.name, name) == 0) {
+                        name_match = 1;
+                    }
+                }
+
+                if (name_match) {
+                    if (out_entry_sector) *out_entry_sector = current_sector;
+                    if (out_entry_offset) *out_entry_offset = d;
+                    if (out_first_cluster) *out_first_cluster = entry.first_cluster;
+                    if (out_file_size) *out_file_size = entry.file_size;
+                    if (lfn_valid) {
+                        if (out_lfn_start_sector) *out_lfn_start_sector = lfn_start_sec;
+                        if (out_lfn_start_offset) *out_lfn_start_offset = lfn_start_off;
+                    } else {
+                        if (out_lfn_start_sector) *out_lfn_start_sector = 0;
+                        if (out_lfn_start_offset) *out_lfn_start_offset = 0;
+                    }
+                    return STATUS_SUCCESS;
+                }
+
+                lfn_valid = 0;
+                RtMemSet(lfn_accum, 0, sizeof(lfn_accum));
+            }
+        }
+    }
+
+    return STATUS_NO_SUCH_FILE;
+}
+
+static ntstatus FatFindFreeSlots(u32 dir_cluster, u32 slots_needed, u32* out_sector, u32* out_offset) {
+    u32 scan_cluster = dir_cluster;
+    u32 root_sec = 0;
+    u32 root_total = 0;
+
+    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+        root_sec = g_fat.root_dir_start_sector;
+        root_total = g_fat.root_dir_sectors;
+    }
+
+    u32 run_start_sector = 0;
+    u32 run_start_offset = 0;
+    u32 run_length = 0;
+
+    i32 scan_done = 0;
+    while (!scan_done) {
+        u32 sector_base;
+        u32 sectors_in_group;
+
+        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+            if (root_total == 0) break;
+            sectors_in_group = root_total;
+            sector_base = root_sec;
+            scan_done = 1;
+        } else {
+            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
+            sectors_in_group = g_fat.sectors_per_cluster;
+            sector_base = FatClusterToSector(scan_cluster);
+            scan_cluster = FatNextCluster(scan_cluster);
+        }
+
+        run_length = 0;
+
+        for (u32 s = 0; s < sectors_in_group; s++) {
+            u32 current_sector = sector_base + s;
+            ntstatus status = FatReadSector(current_sector, g_sector_buf);
+            if (NT_ERROR(status)) return status;
+
+            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
+                u8 first_byte = g_sector_buf[d];
+
+                if (first_byte == 0x00) {
+                    if (run_length == 0) {
+                        run_start_sector = current_sector;
+                        run_start_offset = d;
+                    }
+                    u32 slots_remaining_in_group = ((sectors_in_group - s) * g_fat.bytes_per_sector - d) / 32;
+                    if (slots_remaining_in_group >= slots_needed) {
+                        *out_sector = run_start_sector;
+                        *out_offset = run_start_offset;
+                        return STATUS_SUCCESS;
+                    } else {
+                        run_length = 0;
+                        goto next_cluster;
+                    }
+                }
+
+                if (first_byte == 0xE5) {
+                    if (run_length == 0) {
+                        run_start_sector = current_sector;
+                        run_start_offset = d;
+                    }
+                    run_length++;
+                    if (run_length == slots_needed) {
+                        *out_sector = run_start_sector;
+                        *out_offset = run_start_offset;
+                        return STATUS_SUCCESS;
+                    }
+                } else {
+                    run_length = 0;
+                }
+            }
+        }
+    next_cluster:;
+    }
+
+    return STATUS_NOT_FOUND;
+}
+
+static ntstatus FatExpandDirectory(u32 dir_cluster, u32* out_sector) {
+    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+        return STATUS_DISK_FULL;
+    }
+
+    u32 last = dir_cluster;
+    u32 next;
+    while (last >= 2 && last < FatEofMarker() &&
+           (next = FatNextCluster(last)) >= 2 && next < FatEofMarker()) {
+        last = next;
+    }
+
+    u32 new_cluster = FatAllocateCluster();
+    if (new_cluster == 0) return STATUS_DISK_FULL;
+
+    if (last >= 2 && last < FatEofMarker()) {
+        FatSetFatEntry(last, new_cluster);
+    }
+
+    u32 sector = FatClusterToSector(new_cluster);
+    RtMemSet(g_sector_buf, 0, g_fat.bytes_per_sector);
+    for (u32 s = 0; s < g_fat.sectors_per_cluster; s++) {
+        FatWriteSector(sector + s, g_sector_buf);
+    }
+
+    *out_sector = sector;
+    return STATUS_SUCCESS;
+}
+
+static ntstatus FatWriteDirectoryEntries(u32 start_sector, u32 start_offset, 
+                                         const char* long_name, const char* short_name, 
+                                         u8 attr, u32 first_cluster, u32 size) {
+    u32 slots_needed = 1;
+    i32 need_lfn = long_name ? FatNeedLfn(long_name) : 0;
+    u32 lfn_entries = 0;
+    u8 checksum = 0;
+
+    if (need_lfn) {
+        lfn_entries = (u32)((RtStrLen(long_name) + 12) / 13);
+        slots_needed = lfn_entries + 1;
+        checksum = FatComputeChecksum(short_name);
+    }
+
+    u32 cur_sector = start_sector;
+    u32 cur_offset = start_offset;
+    u8 entry_buf[32];
+
+    for (u32 i = 0; i < slots_needed; i++) {
+        if (need_lfn && i < lfn_entries) {
+            u32 lfn_idx = lfn_entries - 1 - i;
+            u8 seq = (u8)(lfn_idx + 1);
+            if (i == 0) {
+                seq |= 0x40;
+            }
+            FatFormatLfnEntry(entry_buf, long_name, seq, checksum, lfn_idx * 13, (u32)RtStrLen(long_name));
+        } else {
+            RtMemSet(entry_buf, 0, 32);
+            RtMemCopy(entry_buf, short_name, 11);
+            entry_buf[11] = attr;
+            entry_buf[12] = 0;
+            entry_buf[13] = 0;
+            RtMemSet(entry_buf + 14, 0, 6);
+            
+            if (g_fat.type == FAT_TYPE_32) {
+                *(u16*)(entry_buf + 20) = (u16)(first_cluster >> 16);
+                *(u16*)(entry_buf + 26) = (u16)(first_cluster & 0xFFFF);
+            } else {
+                entry_buf[20] = 0; entry_buf[21] = 0;
+                *(u16*)(entry_buf + 26) = (u16)(first_cluster & 0xFFFF);
+            }
+            *(u32*)(entry_buf + 28) = size;
+        }
+
+        ntstatus status = FatReadSector(cur_sector, g_sector_buf);
+        if (NT_ERROR(status)) return status;
+
+        RtMemCopy(g_sector_buf + cur_offset, entry_buf, 32);
+
+        if (i == slots_needed - 1) {
+            if (cur_offset + 32 < g_fat.bytes_per_sector) {
+                if (g_sector_buf[cur_offset + 32] == 0x00) {
+                    g_sector_buf[cur_offset + 32] = 0x00;
+                }
+            }
+        }
+
+        status = FatWriteSector(cur_sector, g_sector_buf);
+        if (NT_ERROR(status)) return status;
+
+        cur_offset += 32;
+        if (cur_offset >= g_fat.bytes_per_sector) {
+            cur_offset = 0;
+            cur_sector++;
+        }
+    }
+
+    return STATUS_SUCCESS;
+}
+
 ntstatus Fat32WriteFile(const char* path, const void* data, u32 size) {
     if (!g_fat_initialized || !g_sector_buf) return STATUS_UNSUCCESSFUL;
     if (!path || !*path) return STATUS_INVALID_PARAMETER;
@@ -965,6 +1345,96 @@ ntstatus Fat32WriteFile(const char* path, const void* data, u32 size) {
         Fat32Close();
     }
 
+    // -----------------------------------------------------------------------
+    // STEP 1: Scan the directory to find an existing entry (or a free slot).
+    // We must do this BEFORE allocating clusters so that FatAllocateCluster()
+    // does not hand us the same clusters the existing file is still using.
+    // -----------------------------------------------------------------------
+    u32 entry_sector = 0;
+    u32 entry_offset = 0;
+    i32 found_existing = 0;
+    u32 old_first_cluster = 0;
+
+    u32 scan_cluster = dir_cluster;
+    u32 root_sec = 0;
+    u32 root_total = 0;
+
+    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+        root_sec = g_fat.root_dir_start_sector;
+        root_total = g_fat.root_dir_sectors;
+    }
+
+    i32 scan_done = 0;
+    while (!scan_done) {
+        u32 sector_base;
+        u32 sectors_in_group;
+
+        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
+            if (root_total == 0) break;
+            sectors_in_group = root_total;
+            sector_base = root_sec;
+            scan_done = 1;
+        } else {
+            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
+            sectors_in_group = g_fat.sectors_per_cluster;
+            sector_base = FatClusterToSector(scan_cluster);
+            scan_cluster = FatNextCluster(scan_cluster);
+        }
+
+        for (u32 s = 0; s < sectors_in_group; s++) {
+            ntstatus status = FatReadSector(sector_base + s, g_sector_buf);
+            if (NT_ERROR(status)) return status;
+
+            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
+                if (g_sector_buf[d] == 0x00) {
+                    scan_done = 1;
+                    goto done_scan;
+                }
+
+                if (g_sector_buf[d] == 0xE5) {
+                    continue;
+                }
+
+                u8 attr = g_sector_buf[d + 11];
+                if ((attr & FAT_ATTR_LFN) == FAT_ATTR_LFN) continue;
+                if (attr & FAT_ATTR_VOLUME_ID) continue;
+
+                i32 match = 1;
+                for (i32 i = 0; i < 11; i++) {
+                    if (g_sector_buf[d + i] != (u8)short_name[i]) { match = 0; break; }
+                }
+
+                if (match) {
+                    u8 entry_attr = g_sector_buf[d + 11];
+                    if (entry_attr & FAT_ATTR_DIRECTORY) {
+                        return STATUS_ACCESS_DENIED;
+                    }
+                    entry_sector = sector_base + s;
+                    entry_offset = d;
+                    found_existing = 1;
+                    old_first_cluster = (g_fat.type == FAT_TYPE_32) ?
+                        ((u32)(*(u16*)(g_sector_buf + d + 20)) << 16) | *(u16*)(g_sector_buf + d + 26) :
+                        *(u16*)(g_sector_buf + d + 26);
+                    goto done_scan;
+                }
+            }
+        }
+    }
+
+done_scan:
+
+    // -----------------------------------------------------------------------
+    // STEP 2: Free OLD clusters BEFORE allocating new ones.
+    // This guarantees FatAllocateCluster() will never return a cluster that
+    // still holds the old file's data (which we are about to overwrite).
+    // -----------------------------------------------------------------------
+    if (found_existing && old_first_cluster >= 2) {
+        FatFreeClusterChain(old_first_cluster);
+    }
+
+    // -----------------------------------------------------------------------
+    // STEP 3: Allocate new clusters and write data.
+    // -----------------------------------------------------------------------
     u32 first_cluster = 0;
     u32 prev_cluster = 0;
 
@@ -1022,172 +1492,31 @@ ntstatus Fat32WriteFile(const char* path, const void* data, u32 size) {
         }
     }
 
-    u32 entry_sector = 0;
-    u32 entry_offset = 0;
-    i32 found_existing = 0;
-    u32 old_first_cluster = 0;
-    i32 found_free = 0;
-    u32 free_sector = 0;
-    u32 free_offset = 0;
-
-    u32 scan_cluster = dir_cluster;
-    u32 root_sec = 0;
-    u32 root_total = 0;
-    u32 last_dir_cluster = dir_cluster;
-
-    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-        root_sec = g_fat.root_dir_start_sector;
-        root_total = g_fat.root_dir_sectors;
-    }
-
-    i32 scan_done = 0;
-    while (!scan_done) {
-        u32 sector_base;
-        u32 sectors_in_group;
-
-        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-            if (root_total == 0) break;
-            sectors_in_group = root_total;
-            sector_base = root_sec;
-            scan_done = 1;
-        } else {
-            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
-            sectors_in_group = g_fat.sectors_per_cluster;
-            sector_base = FatClusterToSector(scan_cluster);
-            last_dir_cluster = scan_cluster;
-            scan_cluster = FatNextCluster(scan_cluster);
-        }
-
-        for (u32 s = 0; s < sectors_in_group; s++) {
-            ntstatus status = FatReadSector(sector_base + s, g_sector_buf);
-            if (NT_ERROR(status)) {
-                if (first_cluster) FatFreeClusterChain(first_cluster);
-                return status;
-            }
-
-            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
-                if (g_sector_buf[d] == 0x00) {
-                    if (!found_free && !found_existing) {
-                        free_sector = sector_base + s;
-                        free_offset = d;
-                        found_free = 1;
-                    }
-                    scan_done = 1;
-                    goto done_scan;
-                }
-
-                if (g_sector_buf[d] == 0xE5) {
-                    if (!found_free && !found_existing) {
-                        free_sector = sector_base + s;
-                        free_offset = d;
-                        found_free = 1;
-                    }
-                    continue;
-                }
-
-                u8 attr = g_sector_buf[d + 11];
-                if ((attr & FAT_ATTR_LFN) == FAT_ATTR_LFN) continue;
-                if (attr & FAT_ATTR_VOLUME_ID) continue;
-
-                i32 match = 1;
-                for (i32 i = 0; i < 11; i++) {
-                    if (g_sector_buf[d + i] != (u8)short_name[i]) { match = 0; break; }
-                }
-
-                if (match) {
-                    u8 entry_attr = g_sector_buf[d + 11];
-                    if (entry_attr & FAT_ATTR_DIRECTORY) {
-                        if (first_cluster) FatFreeClusterChain(first_cluster);
-                        return STATUS_ACCESS_DENIED;
-                    }
-                    entry_sector = sector_base + s;
-                    entry_offset = d;
-                    found_existing = 1;
-                    old_first_cluster = (g_fat.type == FAT_TYPE_32) ?
-                        ((u32)(*(u16*)(g_sector_buf + d + 20)) << 16) | *(u16*)(g_sector_buf + d + 26) :
-                        *(u16*)(g_sector_buf + d + 26);
-                    goto done_scan;
-                }
-            }
-        }
-    }
-
-done_scan:
-
-    if (!found_existing && !found_free) {
-        if (g_fat.type == FAT_TYPE_32) {
-            u32 last = dir_cluster;
-            u32 next;
-            while (last >= 2 && last < FatEofMarker() &&
-                   (next = FatNextCluster(last)) >= 2 && next < FatEofMarker()) {
-                last = next;
-            }
-
-            u32 new_cluster = FatAllocateCluster();
-            if (new_cluster == 0) {
-                if (first_cluster) FatFreeClusterChain(first_cluster);
-                return STATUS_DISK_FULL;
-            }
-
-            if (last >= 2 && last < FatEofMarker())
-                FatSetFatEntry(last, new_cluster);
-            else
-                dir_cluster = new_cluster;
-
-            u32 sector = FatClusterToSector(new_cluster);
-            RtMemSet(g_sector_buf, 0, g_fat.bytes_per_sector);
-            for (u32 s = 0; s < g_fat.sectors_per_cluster; s++) {
-                FatWriteSector(sector + s, g_sector_buf);
-            }
-
-            free_sector = sector;
-            free_offset = 0;
-            found_free = 1;
-        } else {
-            if (first_cluster) FatFreeClusterChain(first_cluster);
-            return STATUS_DISK_FULL;
-        }
-    }
-
-    if (found_existing && old_first_cluster >= 2) {
-        FatFreeClusterChain(old_first_cluster);
-    }
-
-    u32 target_sector = found_existing ? entry_sector : free_sector;
-    u32 target_offset = found_existing ? entry_offset : free_offset;
-
-    ntstatus status = FatReadSector(target_sector, g_sector_buf);
-    if (NT_ERROR(status)) {
-        if (first_cluster) FatFreeClusterChain(first_cluster);
-        return status;
-    }
-
-    u8* entry = g_sector_buf + target_offset;
-
-    RtMemCopy(entry, short_name, 11);
-
-    entry[11] = FAT_ATTR_ARCHIVE;
-    entry[12] = 0;
-    entry[13] = 0;
-    RtMemSet(entry + 14, 0, 6);
-    entry[20] = 0; entry[21] = 0;
-    RtMemSet(entry + 24, 0, 4);
-
-    if (g_fat.type == FAT_TYPE_32) {
-        *(u16*)(entry + 20) = (u16)(first_cluster >> 16);
-        *(u16*)(entry + 26) = (u16)(first_cluster & 0xFFFF);
+    // -----------------------------------------------------------------------
+    // STEP 4: Update the directory entry.
+    // -----------------------------------------------------------------------
+    ntstatus status = STATUS_SUCCESS;
+    if (found_existing) {
+        status = FatWriteDirectoryEntries(entry_sector, entry_offset, NULL, short_name, FAT_ATTR_ARCHIVE, first_cluster, size);
     } else {
-        entry[20] = 0; entry[21] = 0;
-        *(u16*)(entry + 26) = (u16)(first_cluster & 0xFFFF);
+        u32 slots_needed = 1;
+        if (FatNeedLfn(filename)) {
+            slots_needed = ((u32)RtStrLen(filename) + 12) / 13 + 1;
+        }
+
+        u32 target_sector = 0;
+        u32 target_offset = 0;
+        status = FatFindFreeSlots(dir_cluster, slots_needed, &target_sector, &target_offset);
+        if (status == STATUS_NOT_FOUND) {
+            status = FatExpandDirectory(dir_cluster, &target_sector);
+            target_offset = 0;
+        }
+
+        if (NT_SUCCESS(status)) {
+            status = FatWriteDirectoryEntries(target_sector, target_offset, filename, short_name, FAT_ATTR_ARCHIVE, first_cluster, size);
+        }
     }
 
-    *(u32*)(entry + 28) = size;
-
-    if (!found_existing && target_offset + 32 < g_fat.bytes_per_sector) {
-        g_sector_buf[target_offset + 32] = 0x00;
-    }
-
-    status = FatWriteSector(target_sector, g_sector_buf);
     if (NT_ERROR(status)) {
         if (first_cluster) FatFreeClusterChain(first_cluster);
         return status;
@@ -1196,6 +1525,7 @@ done_scan:
     KdPrintf("[FAT] WriteFile: %s cluster=%u size=%u ok\n", filename, first_cluster, size);
     return STATUS_SUCCESS;
 }
+
 
 ntstatus Fat32DeleteFile(const char* path) {
     if (!g_fat_initialized || !g_sector_buf) return STATUS_UNSUCCESSFUL;
@@ -1224,11 +1554,6 @@ ntstatus Fat32DeleteFile(const char* path) {
 
     if (filename[0] == 0) return STATUS_INVALID_PARAMETER;
 
-    char short_name[11];
-    FatGenerateShortName(filename, short_name);
-
-    KdPrintf("[FAT] DeleteFile: path='%s' parent='%s' file='%s'\n", path, parent_path, filename);
-
     u32 dir_cluster;
     if (parent_path[0] == 0) {
         dir_cluster = (g_fat.type == FAT_TYPE_32) ? g_fat.root_cluster : 0;
@@ -1239,135 +1564,48 @@ ntstatus Fat32DeleteFile(const char* path) {
         Fat32Close();
     }
 
-    u32 scan_cluster = dir_cluster;
-    u32 root_sec = 0;
-    u32 root_total = 0;
-
-    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-        root_sec = g_fat.root_dir_start_sector;
-        root_total = g_fat.root_dir_sectors;
-    }
-
-    i32 found = 0;
     u32 entry_sector = 0;
     u32 entry_offset = 0;
     u32 file_cluster = 0;
-    u8  file_attr = 0;
-    i32 lfn_start_sector = -1;
-    i32 lfn_start_offset = -1;
+    u32 lfn_start_sector = 0;
+    u32 lfn_start_offset = 0;
 
-    i32 scan_done = 0;
-    while (!scan_done) {
-        u32 sector_base;
-        u32 sectors_in_group;
-
-        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-            if (root_total == 0) break;
-            sectors_in_group = root_total;
-            sector_base = root_sec;
-            scan_done = 1;
-        } else {
-            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
-            sectors_in_group = g_fat.sectors_per_cluster;
-            sector_base = FatClusterToSector(scan_cluster);
-            scan_cluster = FatNextCluster(scan_cluster);
-        }
-
-        for (u32 s = 0; s < sectors_in_group; s++) {
-            ntstatus status = FatReadSector(sector_base + s, g_sector_buf);
-            if (NT_ERROR(status)) return status;
-
-            i32 prev_lfn_sec = -1;
-            i32 prev_lfn_off = -1;
-
-            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
-                if (g_sector_buf[d] == 0x00) { scan_done = 1; goto del_done_scan; }
-                if (g_sector_buf[d] == 0xE5) { prev_lfn_sec = -1; prev_lfn_off = -1; continue; }
-
-                u8 attr = g_sector_buf[d + 11];
-
-                if ((attr & FAT_ATTR_LFN) == FAT_ATTR_LFN) {
-                    prev_lfn_sec = (i32)(sector_base + s);
-                    prev_lfn_off = (i32)d;
-                    continue;
-                }
-
-                if (attr & FAT_ATTR_VOLUME_ID) { prev_lfn_sec = -1; prev_lfn_off = -1; continue; }
-
-                i32 match = 1;
-                for (i32 i = 0; i < 11; i++) {
-                    if (g_sector_buf[d + i] != (u8)short_name[i]) { match = 0; break; }
-                }
-
-                if (match) {
-                    entry_sector = sector_base + s;
-                    entry_offset = d;
-                    file_attr = attr;
-                    file_cluster = (g_fat.type == FAT_TYPE_32) ?
-                        ((u32)(*(u16*)(g_sector_buf + d + 20)) << 16) | *(u16*)(g_sector_buf + d + 26) :
-                        *(u16*)(g_sector_buf + d + 26);
-                    found = 1;
-                    if (prev_lfn_sec >= 0) {
-                        lfn_start_sector = prev_lfn_sec;
-                        lfn_start_offset = prev_lfn_off;
-                    }
-                    goto del_done_scan;
-                }
-
-                prev_lfn_sec = -1;
-                prev_lfn_off = -1;
-            }
-        }
-    }
-
-del_done_scan:
-
-    if (!found) return STATUS_NO_SUCH_FILE;
+    ntstatus status = FatFindEntry(dir_cluster, filename, &entry_sector, &entry_offset, &file_cluster, NULL, &lfn_start_sector, &lfn_start_offset);
+    if (NT_ERROR(status)) return status;
 
     if (file_cluster >= 2) {
         FatFreeClusterChain(file_cluster);
     }
 
-    if (lfn_start_sector >= 0) {
-        u32 lsec = (u32)lfn_start_sector;
-        u32 loff = (u32)lfn_start_offset;
+    if (lfn_start_sector >= 2) {
+        u32 cur_sec = lfn_start_sector;
+        u32 cur_off = lfn_start_offset;
 
-        if (lsec == entry_sector) {
-            ntstatus status = FatReadSector(lsec, g_sector_buf);
-            if (NT_ERROR(status)) return status;
-            for (u32 d = loff; d < entry_offset; d += 32) {
-                g_sector_buf[d] = 0xE5;
-            }
-            g_sector_buf[entry_offset] = 0xE5;
-            status = FatWriteSector(lsec, g_sector_buf);
-            if (NT_ERROR(status)) return status;
-        } else {
-            ntstatus status = FatReadSector(lsec, g_sector_buf);
-            if (NT_ERROR(status)) return status;
-            for (u32 d = loff; d < g_fat.bytes_per_sector; d += 32) {
-                u8 a = g_sector_buf[d + 11];
-                if ((a & FAT_ATTR_LFN) != FAT_ATTR_LFN) break;
-                g_sector_buf[d] = 0xE5;
-            }
-            status = FatWriteSector(lsec, g_sector_buf);
+        while (1) {
+            status = FatReadSector(cur_sec, g_sector_buf);
             if (NT_ERROR(status)) return status;
 
-            status = FatReadSector(entry_sector, g_sector_buf);
+            g_sector_buf[cur_off] = 0xE5;
+
+            status = FatWriteSector(cur_sec, g_sector_buf);
             if (NT_ERROR(status)) return status;
-            for (u32 d = 0; d < entry_offset; d += 32) {
-                if (g_sector_buf[d] == 0x00 || g_sector_buf[d] == 0xE5) continue;
-                u8 a = g_sector_buf[d + 11];
-                if ((a & FAT_ATTR_LFN) != FAT_ATTR_LFN) break;
-                g_sector_buf[d] = 0xE5;
+
+            if (cur_sec == entry_sector && cur_off == entry_offset) {
+                break;
             }
-            g_sector_buf[entry_offset] = 0xE5;
-            status = FatWriteSector(entry_sector, g_sector_buf);
-            if (NT_ERROR(status)) return status;
+
+            cur_off += 32;
+            if (cur_off >= g_fat.bytes_per_sector) {
+                cur_off = 0;
+                cur_sec++;
+            }
         }
     } else {
-        ntstatus status = FatReadSector(entry_sector, g_sector_buf);
+        status = FatReadSector(entry_sector, g_sector_buf);
         if (NT_ERROR(status)) return status;
+
         g_sector_buf[entry_offset] = 0xE5;
+
         status = FatWriteSector(entry_sector, g_sector_buf);
         if (NT_ERROR(status)) return status;
     }
@@ -1468,110 +1706,27 @@ ntstatus Fat32CreateDirectory(const char* path) {
         FatWriteSector(sector + s, g_sector_buf);
     }
 
-    u32 scan_cluster = dir_cluster;
-    u32 root_sec = 0;
-    u32 root_total = 0;
-    i32 found_free = 0;
-    u32 free_sector = 0;
-    u32 free_offset = 0;
-
-    if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-        root_sec = g_fat.root_dir_start_sector;
-        root_total = g_fat.root_dir_sectors;
+    u32 slots_needed = 1;
+    if (FatNeedLfn(dirname)) {
+        slots_needed = ((u32)RtStrLen(dirname) + 12) / 13 + 1;
     }
 
-    i32 scan_done = 0;
-    while (!scan_done) {
-        u32 sector_base;
-        u32 sectors_in_group;
-
-        if (g_fat.type != FAT_TYPE_32 && dir_cluster == 0) {
-            if (root_total == 0) break;
-            sectors_in_group = root_total;
-            sector_base = root_sec;
-            scan_done = 1;
-        } else {
-            if (scan_cluster < 2 || scan_cluster >= FatEofMarker()) break;
-            sectors_in_group = g_fat.sectors_per_cluster;
-            sector_base = FatClusterToSector(scan_cluster);
-            scan_cluster = FatNextCluster(scan_cluster);
-        }
-
-        for (u32 s = 0; s < sectors_in_group; s++) {
-            status = FatReadSector(sector_base + s, g_sector_buf);
-            if (NT_ERROR(status)) { FatFreeClusterChain(new_cluster); return status; }
-
-            for (u32 d = 0; d < g_fat.bytes_per_sector; d += 32) {
-                if (g_sector_buf[d] == 0x00 || g_sector_buf[d] == 0xE5) {
-                    free_sector = sector_base + s;
-                    free_offset = d;
-                    found_free = 1;
-                    scan_done = 1;
-                    goto mkdir_done_scan;
-                }
-            }
-        }
+    u32 target_sector = 0;
+    u32 target_offset = 0;
+    status = FatFindFreeSlots(dir_cluster, slots_needed, &target_sector, &target_offset);
+    if (status == STATUS_NOT_FOUND) {
+        status = FatExpandDirectory(dir_cluster, &target_sector);
+        target_offset = 0;
     }
 
-mkdir_done_scan:
-
-    if (!found_free) {
-        if (g_fat.type == FAT_TYPE_32) {
-            u32 last = dir_cluster;
-            u32 next;
-            while (last >= 2 && last < FatEofMarker() &&
-                   (next = FatNextCluster(last)) >= 2 && next < FatEofMarker()) {
-                last = next;
-            }
-
-            u32 ext_cluster = FatAllocateCluster();
-            if (ext_cluster == 0) { FatFreeClusterChain(new_cluster); return STATUS_DISK_FULL; }
-
-            if (last >= 2 && last < FatEofMarker())
-                FatSetFatEntry(last, ext_cluster);
-
-            u32 ext_sector = FatClusterToSector(ext_cluster);
-            RtMemSet(g_sector_buf, 0, g_fat.bytes_per_sector);
-            for (u32 s = 0; s < g_fat.sectors_per_cluster; s++) {
-                FatWriteSector(ext_sector + s, g_sector_buf);
-            }
-
-            free_sector = ext_sector;
-            free_offset = 0;
-            found_free = 1;
-        } else {
-            FatFreeClusterChain(new_cluster);
-            return STATUS_DISK_FULL;
-        }
+    if (NT_SUCCESS(status)) {
+        status = FatWriteDirectoryEntries(target_sector, target_offset, dirname, short_name, FAT_ATTR_DIRECTORY, new_cluster, 0);
     }
 
-    status = FatReadSector(free_sector, g_sector_buf);
-    if (NT_ERROR(status)) { FatFreeClusterChain(new_cluster); return status; }
-
-    u8* entry = g_sector_buf + free_offset;
-    RtMemCopy(entry, short_name, 11);
-    entry[11] = FAT_ATTR_DIRECTORY;
-    entry[12] = 0;
-    entry[13] = 0;
-    RtMemSet(entry + 14, 0, 6);
-    entry[20] = 0; entry[21] = 0;
-    RtMemSet(entry + 24, 0, 4);
-
-    if (g_fat.type == FAT_TYPE_32) {
-        *(u16*)(entry + 20) = (u16)(new_cluster >> 16);
-        *(u16*)(entry + 26) = (u16)(new_cluster & 0xFFFF);
-    } else {
-        *(u16*)(entry + 26) = (u16)(new_cluster & 0xFFFF);
+    if (NT_ERROR(status)) {
+        FatFreeClusterChain(new_cluster);
+        return status;
     }
-
-    *(u32*)(entry + 28) = 0;
-
-    if (free_offset + 32 < g_fat.bytes_per_sector) {
-        g_sector_buf[free_offset + 32] = 0x00;
-    }
-
-    status = FatWriteSector(free_sector, g_sector_buf);
-    if (NT_ERROR(status)) { FatFreeClusterChain(new_cluster); return status; }
 
     KdPrintf("[FAT] CreateDirectory: %s cluster=%u ok\n", dirname, new_cluster);
     return STATUS_SUCCESS;

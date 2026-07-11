@@ -193,6 +193,7 @@ static u32 g_file_pos;
 static KFileDesc g_fd_table[MAX_FD];
 
 __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
+    HalSti();
     u64 syscall_num = frame->rax;
     u64 ret = 0;
 
@@ -1012,11 +1013,19 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
         ret = NT_SUCCESS(st) ? 0 : (u64)-1;
         break;
     }
+    case SYS_DNS_RESOLVE: {
+        extern u32 DnsResolve(const char* hostname);
+        const char* hostname = (const char*)SysUserPtr(frame->rbx);
+        if (!hostname) { ret = 0; break; }
+        ret = (u64)DnsResolve(hostname);
+        break;
+    }
     default:
         KdPrintf("[SYSCALL] Unknown syscall %llu\n", syscall_num);
         ret = (u64)-1;
         break;
     }
 
+    HalCli();
     frame->rax = ret;
 }

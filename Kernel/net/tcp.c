@@ -191,6 +191,7 @@ ntstatus TcpConnect(i32 sock, u32 dst_ip, u16 dst_port) {
     s->snd_nxt = s->iss + 1;
     s->rcv_nxt = 0;
     s->state = TCP_STATE_SYN_SENT;
+    s->remote_window = TCP_BUF_SIZE;
     s->retrans_tick = KeGetTickCount() + 20;
     s->retrans_count = 0;
 
@@ -265,8 +266,25 @@ i32 TcpRecv(i32 sock, void* buf, u16 max_len, u32 timeout_ms) {
     TcpSocket* s = &g_tcp_sockets[sock];
     if (!s->used) return -1;
 
+    // Check if we already have data in the buffer
+    if (s->recv_len > 0) {
+        u16 copy = max_len;
+        if (copy > s->recv_len) copy = (u16)s->recv_len;
+        RtMemCopy(buf, s->recv_buf, copy);
+        /* Shift remaining */
+        if (copy < s->recv_len) {
+            RtMemMove(s->recv_buf, s->recv_buf + copy, s->recv_len - copy);
+        }
+        s->recv_len -= copy;
+        return (i32)copy;
+    }
+
+    // If timeout_ms is 0, do not block and return immediately
+    if (timeout_ms == 0) {
+        return 0;
+    }
+
     u64 deadline = KeGetTickCount() + (timeout_ms / 10);
-    if (timeout_ms == 0) deadline = (u64)-1;
 
     while (1) {
         if (s->recv_len > 0) {
@@ -332,6 +350,8 @@ void TcpHandlePacket(u32 src_ip, u32 dst_ip, const void* tcp_data, u16 len) {
 
     TcpSocket* s = TcpFindSocket(dst_port, src_ip, src_port);
     if (!s) return;
+
+    s->remote_window = NetSwap16(hdr->window);
 
     /* Validate checksum? Skip for performance in hobby OS */
 

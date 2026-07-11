@@ -48,6 +48,7 @@
 #define SYS_NET_SEND      54
 #define SYS_NET_RECV      55
 #define SYS_NET_CLOSE     56
+#define SYS_DNS_RESOLVE   57
 
 #define SYS_SYS_REBOOT      0
 #define SYS_SYS_HALT        1

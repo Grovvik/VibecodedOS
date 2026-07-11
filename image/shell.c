@@ -1,6 +1,7 @@
 #include "userlib.h"
 
 #define SHELL_MAX_LINE 256
+#define FAT_MAX_PATH   260
 
 static char g_cwd[FAT_MAX_PATH] = "/";
 

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -148,6 +148,7 @@
     <ClCompile Include="net\arp.c" />
     <ClCompile Include="net\ipv4.c" />
     <ClCompile Include="net\tcp.c" />
+    <ClCompile Include="net\udp.c" />
     <ClCompile Include="net\net.c" />
     <ClCompile Include="loader\pe_loader.c" />
   </ItemGroup>

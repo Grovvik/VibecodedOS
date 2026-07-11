@@ -52,6 +52,7 @@ typedef u64 usize;
 #define SYS_NET_SEND      54
 #define SYS_NET_RECV      55
 #define SYS_NET_CLOSE     56
+#define SYS_DNS_RESOLVE   57
 
 #define SYS_SYS_REBOOT      0
 #define SYS_SYS_HALT        1
@@ -176,12 +177,29 @@ i32   net_connect(i32 sock, u32 ip, u16 port);
 i32   net_send(i32 sock, const void* buf, u16 len);
 i32   net_recv(i32 sock, void* buf, u16 len, u32 timeout_ms);
 i32   net_close(i32 sock);
+u32   net_resolve(const char* hostname); /* DNS A-record lookup */
 
 void  itoa(i64 val, char* buf, i32 base);
 void  utoa(u64 val, char* buf, i32 base);
 void  printf(const char* fmt, ...);
 
 i32 parse_args(const char* args, char** argv, i32 max);
+
+// Standard constants
+#ifndef NULL
+#define NULL ((void*)0)
+#endif
+#ifndef EOF
+#define EOF (-1)
+#endif
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#endif
+#ifndef FAT_MAX_PATH
+#define FAT_MAX_PATH 256
+#endif
 
 // Standard compatibility layer extensions
 typedef struct _FILE FILE;
@@ -201,6 +219,16 @@ int fseek(FILE* fp, long offset, int whence);
 long ftell(FILE* fp);
 int fputc(int c, FILE* fp);
 int fputs(const char* s, FILE* fp);
+
+// wolfSSL-backed TLS Client API
+typedef struct tls_session tls_session_t;
+int  tls_library_init(void);
+tls_session_t* tls_session_create(int sock, const char* host);
+int  tls_handshake(tls_session_t* session);
+int  tls_write(tls_session_t* session, const void* buf, int len);
+int  tls_read(tls_session_t* session, void* buf, int len);
+void tls_session_free(tls_session_t* session);
+
 
 #include <stdarg.h>
 int vsnprintf(char* buf, size_t size, const char* fmt, va_list ap);
@@ -244,5 +272,20 @@ long strtol(const char* nptr, char** endptr, int base);
 long double ldexpl(long double x, int exp);
 struct tm* localtime(const time_t* timep);
 char* realpath(const char* path, char* resolved_path);
+
+// Universal stdout redirect: all print()/putchar()/printf() output is
+// captured to fp.  Pass NULL to restore normal screen output.
+void set_stdout_redirect(FILE* fp);
+
+// ---------------------------------------------------------------------------
+// Path resolution (user-mode only).
+// Resolves `user_path` relative to `cwd` into a canonical absolute path in
+// `out`.  Handles:  absolute paths, "..", ".", and bare filenames.
+// `out` must be at least FAT_MAX_PATH (256) bytes.
+// ---------------------------------------------------------------------------
+void path_resolve(const char* cwd, const char* user_path, char* out);
+
+// Convenience: returns pointer to the filename component of an absolute path.
+const char* path_basename(const char* path);
 
 #endif

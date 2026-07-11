@@ -227,7 +227,7 @@ void KernelMain(BootInfo* boot_info) {
 
     KdPrintf("[KE] Step 13: Initializing network stack...\n");
     /* Default QEMU user networking IP: 10.0.2.15/24, GW: 10.0.2.2 */
-    NetInit(0x0F00020A, 0x0200020A, 0x00FFFFFF);
+    NetInit(0x0F02000A, 0x0202000A, 0x00FFFFFF);
     KdPrintf("[KE] Step 13: Network OK\n");
 
     KdPrintf("[KE] Step 14: Initializing syscall interface...\n");

@@ -1,6 +1,8 @@
 #include "keyboard.h"
 #include "hal.h"
 #include "debug.h"
+#include "proc/process.h"
+#include "arch/syscall.h"
 
 #define KBD_DATA_PORT    0x60
 #define KBD_STATUS_PORT  0x64
@@ -98,6 +100,17 @@ void KeyboardIrqHandler(TrapFrame* frame) {
     u8 scancode = HalInByte(KBD_DATA_PORT);
     u8 raw = scancode & 0x7F;
     u8 released = scancode & 0x80;
+
+    // Check for Ctrl+C to kill the active foreground process
+    if (g_ctrl_state && !released && raw == 0x2E) {
+        KThread* t = PsGetCurrentThread();
+        if (t && t->process && t->process->pid > 1) {
+            KdPrintf("[KBD] Ctrl+C pressed! Killing foreground process PID=%llu (%s)\n",
+                     t->process->pid, t->process->name);
+            SyscallKillCurrentProcess(frame);
+            return;
+        }
+    }
 
     if (raw == 0xE0) {
         g_extended = 1;

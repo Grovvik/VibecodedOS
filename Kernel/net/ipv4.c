@@ -2,6 +2,7 @@
 #include "ethernet.h"
 #include "arp.h"
 #include "tcp.h"
+#include "udp.h"
 #include "debug.h"
 #include "runtime.h"
 #include "error.h"
@@ -100,10 +101,10 @@ void Ipv4HandlePacket(const Ipv4Header* hdr, u16 len) {
     u16 payload_len = total_len - hdr_len;
     const void* payload = (const u8*)hdr + hdr_len;
 
-    KdPrintf("[IPv4] packet from %u.%u.%u.%u proto=%u len=%u\n",
-             (hdr->src_ip >> 0) & 0xFF, (hdr->src_ip >> 8) & 0xFF,
-             (hdr->src_ip >> 16) & 0xFF, (hdr->src_ip >> 24) & 0xFF,
-             hdr->protocol, payload_len);
+    // KdPrintf("[IPv4] packet from %u.%u.%u.%u proto=%u len=%u\n",
+    //          (hdr->src_ip >> 0) & 0xFF, (hdr->src_ip >> 8) & 0xFF,
+    //          (hdr->src_ip >> 16) & 0xFF, (hdr->src_ip >> 24) & 0xFF,
+    //          hdr->protocol, payload_len);
 
     switch (hdr->protocol) {
     case IP_PROTO_TCP:
@@ -113,7 +114,7 @@ void Ipv4HandlePacket(const Ipv4Header* hdr, u16 len) {
         /* Not implemented for now */
         break;
     case IP_PROTO_UDP:
-        /* Not implemented for now */
+        UdpHandlePacket(hdr->src_ip, payload, payload_len);
         break;
     default:
         break;

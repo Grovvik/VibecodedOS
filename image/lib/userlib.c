@@ -2,6 +2,16 @@
 #include <stdarg.h>
 
 #define PAGE_SIZE 4096
+
+// ============================================================================
+// Universal stdout redirect support
+// print() and putchar() check this pointer; if set, output goes to a FILE.
+// set_stdout_redirect() is defined later (after FILE is fully declared).
+// We use a raw function pointer so we don't depend on FILE being defined yet.
+// ============================================================================
+typedef void (*_PrintRedirectFn)(const char* s, void* ctx);
+static _PrintRedirectFn _g_print_redirect_fn = ((void*)0);
+static void* _g_print_redirect_ctx = ((void*)0);
 #ifndef NULL
 #define NULL ((void*)0)
 #endif
@@ -14,6 +24,10 @@
 // ============================================================================
 
 void print(const char* s) {
+    if (_g_print_redirect_fn) {
+        _g_print_redirect_fn(s, _g_print_redirect_ctx);
+        return;
+    }
     syscall1(SYS_PUTS, (u64)(usize)s);
 }
 
@@ -119,6 +133,10 @@ i32 net_close(i32 sock) {
     return (i32)syscall1(SYS_NET_CLOSE, (u64)sock);
 }
 
+u32 net_resolve(const char* hostname) {
+    return (u32)syscall1(SYS_DNS_RESOLVE, (u64)(usize)hostname);
+}
+
 // ============================================================================
 // ����� 2: �������������� � ����� (ORIGINAL USERLIB)
 // ============================================================================
@@ -143,53 +161,9 @@ void utoa(u64 val, char* buf, i32 base) {
     *buf = 0;
 }
 
-static char g_printf_buf[512];
-
-void printf(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    char* p = g_printf_buf;
-    while (*fmt && (p - g_printf_buf) < 510) {
-        if (*fmt != '%') { *p++ = *fmt++; continue; }
-        fmt++;
-        switch (*fmt) {
-        case 's': {
-            const char* s = va_arg(ap, const char*);
-            if (s) while (*s) *p++ = *s++;
-            break;
-        }
-        case 'd': {
-            i32 val = va_arg(ap, i32);
-            char num[20]; itoa((i64)val, num, 10);
-            char* n = num; while (*n) *p++ = *n++;
-            break;
-        }
-        case 'u': {
-            u32 val = va_arg(ap, u32);
-            char num[20]; utoa((u64)val, num, 10);
-            char* n = num; while (*n) *p++ = *n++;
-            break;
-        }
-        case 'x': {
-            u32 val = va_arg(ap, u32);
-            char num[20]; utoa((u64)val, num, 16);
-            char* n = num; while (*n) *p++ = *n++;
-            break;
-        }
-        case 'c': {
-            char c = (char)va_arg(ap, i32);
-            *p++ = c;
-            break;
-        }
-        case '%': *p++ = '%'; break;
-        default: *p++ = '%'; *p++ = *fmt; break;
-        }
-        fmt++;
-    }
-    *p = 0;
-    print(g_printf_buf);
-    va_end(ap);
-}
+// printf is now implemented below as a wrapper around vprintf
+// (which calls vfprintf(stdout, ...) -> format_output -> fputc -> print)
+// This way all output goes through the redirect when active.
 
 i32 parse_args(const char* args, char** argv, i32 max) {
     i32 argc = 0;
@@ -257,8 +231,14 @@ int strncmp(const char* a, const char* b, usize n) {
 char* strcpy(char* dst, const char* src) { char* d = dst; while ((*d++ = *src++)); return dst; }
 char* strncpy(char* dst, const char* src, usize n) {
     char* d = dst;
-    while (n-- && (*d++ = *src++));
-    while (n-- > 0) *d++ = 0;
+    while (n > 0 && *src) {
+        *d++ = *src++;
+        n--;
+    }
+    while (n > 0) {
+        *d++ = 0;
+        n--;
+    }
     return dst;
 }
 
@@ -311,8 +291,11 @@ typedef struct MallocHeader {
 static MallocHeader* malloc_head = NULL;
 
 static void* malloc_from_mmap(usize size) {
+    if (size > 0x7FFFFFFFFFFFFFFF - sizeof(MallocHeader)) return NULL;
     usize total = sizeof(MallocHeader) + size;
-    total = (total + PAGE_SIZE - 1) & ~((usize)PAGE_SIZE - 1);
+    usize aligned_total = (total + PAGE_SIZE - 1) & ~((usize)PAGE_SIZE - 1);
+    if (aligned_total < total) return NULL;
+    total = aligned_total;
 
     u64 ptr = syscall1(SYS_MMAP, total); // ���������� syscall ��������
     if (!ptr) return NULL;
@@ -341,8 +324,10 @@ static void* malloc_from_mmap(usize size) {
 }
 
 void* malloc(usize size) {
-    if (size == 0) return NULL;
-    size = (size + MALLOC_ALIGN - 1) & ~((usize)MALLOC_ALIGN - 1);
+    if (size == 0 || size > 0x7FFFFFFFFFFFFFFF) return NULL;
+    usize aligned_size = (size + MALLOC_ALIGN - 1) & ~((usize)MALLOC_ALIGN - 1);
+    if (aligned_size < size) return NULL;
+    size = aligned_size;
     if (size < MALLOC_MIN_BLOCK) size = MALLOC_MIN_BLOCK;
 
     MallocHeader* best = NULL;
@@ -788,6 +773,37 @@ int fprintf(FILE* fp, const char* fmt, ...) {
 
 int vprintf(const char* fmt, va_list ap) {
     return vfprintf(stdout, fmt, ap);
+}
+
+void printf(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+}
+
+// ============================================================================
+// set_stdout_redirect: wire up the print redirect to a FILE*
+// Call with fp != NULL to start capturing; call with NULL to stop.
+// ============================================================================
+static void _print_redirect_to_file(const char* s, void* ctx) {
+    FILE* fp = (FILE*)ctx;
+    if (!fp) return;
+    while (*s) fputc(*s++, fp);
+}
+
+void set_stdout_redirect(FILE* fp) {
+    if (fp) {
+        _g_print_redirect_fn  = _print_redirect_to_file;
+        _g_print_redirect_ctx = fp;
+        // Also point stdout at this file so fprintf/vfprintf work too
+        stdout = fp;
+    } else {
+        _g_print_redirect_fn  = ((void*)0);
+        _g_print_redirect_ctx = ((void*)0);
+        // Restore the real stdout (fd==1)
+        stdout = &_stdout;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -1340,4 +1356,104 @@ void tcc_main_entry(const char* args, const char* cwd, i32 argc_dummy) {
     
     int ret = main(ac, argv);
     exit(ret);
+}
+
+// ============================================================================
+// path_resolve  –  user-mode only, never called in kernel
+// ============================================================================
+//
+// Resolves `user_path` relative to `cwd` into a canonical absolute path
+// stored in `out` (must be >= FAT_MAX_PATH = 256 bytes).
+//
+// Rules:
+//   - If user_path starts with '/' it is already absolute; we only normalise.
+//   - Otherwise it is joined to cwd with a '/'.
+//   - Then the combined string is walked token by token:
+//       "."  → skip
+//       ".." → pop the last component (do not go above root)
+//       else → push the component
+//   - The result always starts with '/'.
+//
+void path_resolve(const char* cwd, const char* user_path, char* out) {
+    char work[512];
+
+    // 1. Build the raw (un-normalised) combined path in `work`
+    if (!user_path || !*user_path) {
+        // empty path → return cwd as-is
+        if (cwd && *cwd) strcpy(out, cwd);
+        else { out[0] = '/'; out[1] = 0; }
+        return;
+    }
+
+    if (user_path[0] == '/' || user_path[0] == '\\') {
+        // absolute: just use user_path
+        strcpy(work, user_path);
+    } else {
+        // relative: join cwd + '/' + user_path
+        if (cwd && *cwd) {
+            strcpy(work, cwd);
+        } else {
+            work[0] = '/'; work[1] = 0;
+        }
+        size_t wlen = strlen(work);
+        if (wlen > 0 && work[wlen - 1] != '/' && work[wlen - 1] != '\\') {
+            work[wlen] = '/';
+            work[wlen + 1] = 0;
+        }
+        strcat(work, user_path);
+    }
+
+    // Normalise backslashes
+    for (char* p = work; *p; p++) if (*p == '\\') *p = '/';
+
+    // 2. Tokenise and process . / ..
+    // We keep a small stack of pointers into `work` (each token is NUL-terminated in place)
+    char* parts[64];
+    int   nparts = 0;
+
+    char* p = work;
+    while (*p == '/') p++;   // skip leading slash(es)
+
+    while (*p) {
+        // find end of current token
+        char* end = p;
+        while (*end && *end != '/') end++;
+        int was_end = (*end == 0);
+        *end = 0;   // NUL-terminate the token in work
+
+        if (strcmp(p, ".") == 0) {
+            // current dir: skip
+        } else if (strcmp(p, "..") == 0) {
+            if (nparts > 0) nparts--;   // pop last component, never below root
+        } else if (*p != 0) {
+            if (nparts < 64) parts[nparts++] = p;
+        }
+
+        if (was_end) break;
+        p = end + 1;
+        while (*p == '/') p++;  // skip consecutive slashes
+    }
+
+    // 3. Rebuild into `out`
+    if (nparts == 0) {
+        out[0] = '/'; out[1] = 0;
+        return;
+    }
+    size_t pos = 0;
+    for (int i = 0; i < nparts; i++) {
+        out[pos++] = '/';
+        size_t len = strlen(parts[i]);
+        memcpy(out + pos, parts[i], len);
+        pos += len;
+    }
+    out[pos] = 0;
+}
+
+const char* path_basename(const char* path) {
+    const char* last = path;
+    while (*path) {
+        if (*path == '/' || *path == '\\') last = path + 1;
+        path++;
+    }
+    return last;
 }

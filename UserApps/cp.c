@@ -15,9 +15,14 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    FILE* src_fp = fopen(argv[0], "rb");
+    char src_abs[512];
+    char dst_abs[512];
+    path_resolve(cwd, argv[0], src_abs);
+    path_resolve(cwd, argv[1], dst_abs);
+
+    FILE* src_fp = fopen(src_abs, "rb");
     if (!src_fp) {
-        printf("cp: cannot open '%s'\n", argv[0]);
+        printf("cp: cannot open '%s'\n", src_abs);
         return;
     }
 
@@ -25,7 +30,7 @@ void main(const char* args, const char* cwd, i32 argc) {
     u32 size = (u32)ftell(src_fp);
     if (size == 0) {
         fclose(src_fp);
-        printf("cp: '%s' is empty\n", argv[0]);
+        printf("cp: '%s' is empty\n", src_abs);
         return;
     }
     fseek(src_fp, 0, SEEK_SET);
@@ -46,33 +51,25 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    // Determine destination path (if dst is a directory, append src filename)
-    char dest_path[512];
-    const char* src_name = argv[0];
-    const char* p = argv[0];
-    while (*p) {
-        if (*p == '/' || *p == '\\') src_name = p + 1;
-        p++;
-    }
+    // If dst is a directory, append source filename
+    char final_dst[512];
+    strcpy(final_dst, dst_abs);
 
-    u64 opendir_rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)argv[1]);
+    u64 opendir_rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)final_dst);
     if (opendir_rc == 0) {
         syscall0(SYS_FS_CLOSEDIR);
-        strcpy(dest_path, argv[1]);
-        u32 len = strlen(dest_path);
-        if (len > 0 && dest_path[len - 1] != '/' && dest_path[len - 1] != '\\') {
-            dest_path[len] = '/';
-            dest_path[len + 1] = 0;
+        size_t dlen = strlen(final_dst);
+        if (dlen > 0 && final_dst[dlen - 1] != '/') {
+            final_dst[dlen] = '/';
+            final_dst[dlen + 1] = 0;
         }
-        strcat(dest_path, src_name);
-    } else {
-        strcpy(dest_path, argv[1]);
+        strcat(final_dst, path_basename(src_abs));
     }
 
-    FILE* dst_fp = fopen(dest_path, "wb");
+    FILE* dst_fp = fopen(final_dst, "wb");
     if (!dst_fp) {
         free(buf);
-        printf("cp: cannot create destination '%s'\n", dest_path);
+        printf("cp: cannot create '%s'\n", final_dst);
         return;
     }
 
@@ -81,7 +78,7 @@ void main(const char* args, const char* cwd, i32 argc) {
     free(buf);
 
     if (written == total_read)
-        printf("Copied %u bytes: %s -> %s\n", (u32)total_read, argv[0], dest_path);
+        printf("Copied %u bytes: %s -> %s\n", (u32)total_read, src_abs, final_dst);
     else
-        printf("cp: failed to write '%s'\n", dest_path);
+        printf("cp: write error on '%s'\n", final_dst);
 }
