@@ -21,6 +21,7 @@ static void Invlpg(u64 virt) {
 
 void VmmInit(void) {
     u64 pml4_phys = PmmAllocPage();
+    PmmPinPage(pml4_phys);  /* Kernel PML4 must never be freed */
     g_kernel_pml4 = (u64*)PHYS_TO_VIRT(pml4_phys);
     RtMemSet(g_kernel_pml4, 0, PAGE_SIZE);
 
@@ -68,7 +69,7 @@ u64* VmmGetPml4(void) {
     return g_kernel_pml4;
 }
 
-static u64* GetNextLevel(u64* current_level, u32 index, u64 flags) {
+static u64* GetNextLevel(u64* current_level, u32 index, u64 flags, int pin) {
     if (current_level[index] & VMM_PRESENT) {
         if (flags & VMM_USER) {
             current_level[index] |= VMM_USER;
@@ -84,17 +85,23 @@ static u64* GetNextLevel(u64* current_level, u32 index, u64 flags) {
     if (flags & VMM_USER) dir_flags |= VMM_USER;
     
     current_level[index] = phys | dir_flags;
+
+    /* Pin every newly-allocated kernel page-table page so PMM can never
+       reclaim them (prevents the use-after-free that corrupts shared PTEs). */
+    if (pin) PmmPinPage(phys);
+
     return virt;
 }
 
 void VmmMapPage(u64* pml4, u64 virt, u64 phys, u64 flags) {
-    u64* pdpt = GetNextLevel(pml4, PML4E_INDEX(virt), flags);
+    int pin = (pml4 == g_kernel_pml4) ? 1 : 0;
+    u64* pdpt = GetNextLevel(pml4, PML4E_INDEX(virt), flags, pin);
     if (!pdpt) return;
     
-    u64* pd = GetNextLevel(pdpt, PDPTE_INDEX(virt), flags);
+    u64* pd = GetNextLevel(pdpt, PDPTE_INDEX(virt), flags, pin);
     if (!pd) return;
     
-    u64* pt = GetNextLevel(pd, PDE_INDEX(virt), flags);
+    u64* pt = GetNextLevel(pd, PDE_INDEX(virt), flags, pin);
     if (!pt) return;
     
     pt[PTE_INDEX(virt)] = (phys & PAGE_MASK) | flags;
@@ -162,10 +169,18 @@ u64* VmmCreateAddressSpace(void) {
     u64* pml4 = (u64*)PHYS_TO_VIRT(pml4_phys);
     RtMemSet(pml4, 0, PAGE_SIZE);
     
+    /* Share kernel's higher-half mappings (PML4[256..511]) */
     for (i32 i = 256; i < 512; i++) {
         pml4[i] = g_kernel_pml4[i];
     }
-    
+
+    /* Identity-map low memory + kernel image + framebuffer + PCI range so
+       that kernel interrupt handlers (which run at low virtual addresses)
+       remain reachable when this process's CR3 is active.  These per-process
+       page table pages are separate from the kernel's own structural pages;
+       the kernel's structural pages are pinned by VmmPinKernelPageTables so
+       PmmFreePage will never release them even if they are encountered by
+       PsFreeAddressSpace. */
     for (u64 i = 0; i < 0x100000; i += PAGE_SIZE) {
         VmmMapPage(pml4, i, i, VMM_KERNEL_FLAGS);
     }
@@ -187,6 +202,38 @@ u64* VmmCreateAddressSpace(void) {
     }
 
     return pml4;
+}
+
+/* Walk the kernel's PML4 and pin every intermediate page-table page
+   (PDPT / PD / PT) so PmmFreePage will silently ignore any attempt to
+   release them.  Call this once, immediately after VmmInit(). */
+void VmmPinKernelPageTables(void) {
+    u64 pml4_phys = (u64)(usize)g_kernel_pml4 - PHYS_OFFSET;
+    PmmPinPage(pml4_phys);
+
+    for (i32 i = 0; i < 512; i++) {
+        if (!(g_kernel_pml4[i] & VMM_PRESENT)) continue;
+        u64 pdpt_phys = g_kernel_pml4[i] & PAGE_MASK;
+        PmmPinPage(pdpt_phys);
+        u64* pdpt = (u64*)PHYS_TO_VIRT(pdpt_phys);
+
+        for (i32 j = 0; j < 512; j++) {
+            if (!(pdpt[j] & VMM_PRESENT)) continue;
+            if (pdpt[j] & VMM_HUGE) continue;
+            u64 pd_phys = pdpt[j] & PAGE_MASK;
+            PmmPinPage(pd_phys);
+            u64* pd = (u64*)PHYS_TO_VIRT(pd_phys);
+
+            for (i32 k = 0; k < 512; k++) {
+                if (!(pd[k] & VMM_PRESENT)) continue;
+                if (pd[k] & VMM_HUGE) continue;
+                u64 pt_phys = pd[k] & PAGE_MASK;
+                PmmPinPage(pt_phys);
+                /* data pages (pointed to by PTEs) are NOT pinned */
+            }
+        }
+    }
+    KdPrintf("[VMM] Kernel page-table pages pinned\n");
 }
 
 void VmmSwitchAddressSpace(u64 pml4_phys) {

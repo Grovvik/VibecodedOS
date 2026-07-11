@@ -24,9 +24,17 @@ echo [3/4] Preparing image...
 if not exist "image\efi\boot" mkdir "image\efi\boot"
 if not exist "image\efi\os"   mkdir "image\efi\os"
 if not exist "image\bin"      mkdir "image\bin"
+if not exist "image\lib"      mkdir "image\lib"
+if not exist "image\include"  mkdir "image\include"
+if not exist "image\include\sys" mkdir "image\include\sys"
 copy /Y "%BIN_DIR%Boot.efi"   "image\efi\boot\bootx64.efi" >nul
 copy /Y "%BIN_DIR%Kernel.exe" "image\efi\os\kernel.exe"    >nul
 copy /Y "%SOL_DIR%UserApps\*.exe" "image\bin\"             >nul
+copy /Y "%SOL_DIR%UserApps\userlib\*.obj" "image\lib\"     >nul
+copy /Y "%SOL_DIR%UserApps\userlib\*.c" "image\lib\"       >nul
+copy /Y "%SOL_DIR%UserApps\userlib\*.h" "image\include\"   >nul
+copy /Y "%SOL_DIR%UserApps\userlib\sys\*.h" "image\include\sys\" >nul
+copy /Y "%SOL_DIR%UserApps\tinycc\include\*.h" "image\include\" >nul
 
 echo [4/4] Launching QEMU...
 "%QEMU%" -m 512 -cpu qemu64 -smp 1 -serial mon:stdio -no-reboot -no-shutdown -device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::8080-:80 -device intel-hda -device hda-output -L . -pflash "%FW%" -drive format=raw,file=fat:rw:image

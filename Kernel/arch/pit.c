@@ -49,6 +49,10 @@ void KeInitPit(u32 freq) {
 void PitIrqHandler(TrapFrame* frame) {
     g_tick_count++;
 
+    if (g_tick_count % 500 == 0) {
+        KdPrintf("[PIT] Tick count: %llu\n", g_tick_count);
+    }
+
     NetPoll();
 
     extern void HdaPoll(void);

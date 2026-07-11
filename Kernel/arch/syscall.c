@@ -768,6 +768,15 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
             if (t && t->process) __writecr3(t->process->page_table);
             ntstatus status = Fat32ReadFileAt(f->path, f->pos, rbuf, rcount, &bytes_read);
             if (t && t->process) __writecr3(saved_cr3);
+
+            KdPrintf("[DEBUG SYS_READ] fd=%d path='%s' pos=%u rcount=%u bytes_read=%u status=0x%x\n",
+                     fd, f->path, f->pos, rcount, bytes_read, status);
+            if (bytes_read > 0) {
+                u8* p_user = (u8*)rbuf;
+                KdPrintf("[DEBUG SYS_READ] user first bytes: 0x%02x 0x%02x 0x%02x 0x%02x\n",
+                         p_user[0], p_user[1], p_user[2], p_user[3]);
+            }
+
             if (NT_ERROR(status)) { ret = (u64)-1; break; }
             f->pos += bytes_read;
             ret = (u64)bytes_read;

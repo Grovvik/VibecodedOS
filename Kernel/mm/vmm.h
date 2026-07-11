@@ -22,6 +22,7 @@ extern u8 g_vmm_active;
 #define PHYS_TO_VIRT(p) (g_vmm_active ? ((p) + PHYS_OFFSET) : (p))
 
 void VmmInit(void);
+void VmmPinKernelPageTables(void);  /* Pin kernel PDPT/PD/PT pages after VmmInit */
 
 u64* VmmGetPml4(void);
 u64* VmmCreateAddressSpace(void);

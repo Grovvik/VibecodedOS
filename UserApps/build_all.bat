@@ -21,7 +21,7 @@ move syscall.obj userlib\ >nul 2>&1
 if not exist userlib.obj echo FAILED: userlib.c && goto :fail
 move userlib.obj userlib\ >nul 2>&1
 
-for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell test audio_test nc) do (
+for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell test audio_test nc test_read) do (
     "%MSVC_BIN%\cl.exe" %CL_OPTS% %%f.c
     if exist %%f.obj (
         "%MSVC_BIN%\link.exe" %LINK_OPTS% %USERLIB% %%f.obj /out:%%f.exe
@@ -34,6 +34,20 @@ for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm
     ) else (
         echo FAILED: %%f
     )
+)
+
+echo Building tcc...
+"%MSVC_BIN%\cl.exe" %CL_OPTS% /Itinycc tinycc\tcc.c
+if exist tcc.obj (
+    "%MSVC_BIN%\link.exe" %LINK_OPTS% /entry:_tcc_start %USERLIB% tcc.obj /out:tcc.exe
+    if exist tcc.exe (
+        echo Built: tcc.exe
+    ) else (
+        echo FAILED: tcc.exe
+    )
+    del tcc.obj 2>nul
+) else (
+    echo FAILED: tcc.c compile
 )
 
 echo.

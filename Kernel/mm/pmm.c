@@ -10,13 +10,16 @@ static u64  g_pmm_total_pages;
 static u64  g_pmm_used_pages;
 static u64  g_pmm_highest_page;
 static u64  g_pmm_bitmap[PMM_BITMAP_SIZE_MAX];
+static u64  g_pmm_pinned[PMM_BITMAP_SIZE_MAX]; /* Pages that must never be freed */
 static u32  g_pmm_bitmap_size;
 
 #define BITMAP_INDEX(page) ((u32)((page) / 64))
 #define BITMAP_OFFSET(page) ((u32)((page) % 64))
-#define BITMAP_SET(page)   (g_pmm_bitmap[BITMAP_INDEX(page)] |= (1ULL << BITMAP_OFFSET(page)))
-#define BITMAP_CLEAR(page) (g_pmm_bitmap[BITMAP_INDEX(page)] &= ~(1ULL << BITMAP_OFFSET(page)))
-#define BITMAP_TEST(page)  ((g_pmm_bitmap[BITMAP_INDEX(page)] >> BITMAP_OFFSET(page)) & 1)
+#define BITMAP_SET(page)    (g_pmm_bitmap[BITMAP_INDEX(page)] |= (1ULL << BITMAP_OFFSET(page)))
+#define BITMAP_CLEAR(page)  (g_pmm_bitmap[BITMAP_INDEX(page)] &= ~(1ULL << BITMAP_OFFSET(page)))
+#define BITMAP_TEST(page)   ((g_pmm_bitmap[BITMAP_INDEX(page)] >> BITMAP_OFFSET(page)) & 1)
+#define PINNED_SET(page)    (g_pmm_pinned[BITMAP_INDEX(page)] |= (1ULL << BITMAP_OFFSET(page)))
+#define PINNED_TEST(page)   ((g_pmm_pinned[BITMAP_INDEX(page)] >> BITMAP_OFFSET(page)) & 1)
 
 static void PmmMarkRegionUsed(u64 base, u64 length) {
     u64 start = base / PAGE_SIZE;
@@ -163,12 +166,21 @@ void PmmFreePage(u64 phys_addr) {
         KdPrintf("[PMM] FreePage: 0x%llx exceeds highest page %llu!\n", phys_addr, g_pmm_highest_page);
         return;
     }
+    /* Never free pinned (kernel structural) pages */
+    if (PINNED_TEST(page)) return;
     if (!BITMAP_TEST(page)) {
         KdPrintf("[PMM] FreePage: 0x%llx (page %llu) already free! Double-free detected\n", phys_addr, page);
         return;
     }
     BITMAP_CLEAR(page);
     g_pmm_used_pages--;
+}
+
+void PmmPinPage(u64 phys_addr) {
+    if (phys_addr == 0) return;
+    u64 page = phys_addr / PAGE_SIZE;
+    if (page >= g_pmm_highest_page) return;
+    PINNED_SET(page);
 }
 
 void PmmFreePages(u64 phys_addr, u64 count) {

@@ -82,7 +82,7 @@ static void KePrintBanner(void) {
 }
 
 static void KeLaunchShell(void) {
-    KdPrintf("[KE] Launching /bin/doom.exe as first user process (TEST)...\n");
+    KdPrintf("[KE] Launching /bin/shell.exe as first user process...\n");
 
     KProcess* proc = NULL;
     ntstatus status = PeLoadProgram("/bin/shell.exe", &proc);
@@ -250,6 +250,11 @@ void KernelMain(BootInfo* boot_info) {
     FbSetColor(FB_GREEN, FB_BLACK);
     FbPrintString("Kernel initialized successfully!\n\n");
     FbSetColor(FB_WHITE, FB_BLACK);
+
+    /* Pin all kernel page-table pages now that every subsystem has been initialized.
+       This catches any PDPT/PD/PT pages allocated during HeapInit, PciInit, etc.
+       From this point on, PmmFreePage will silently ignore these pages. */
+    VmmPinKernelPageTables();
 
     KeLaunchShell();
 

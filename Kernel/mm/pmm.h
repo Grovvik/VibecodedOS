@@ -14,5 +14,6 @@ u64      PmmGetUsedPages(void);
 u64      PmmGetFreePages(void);
 u64      PmmGetHighestPage(void);
 int      PmmIsPageTracked(u64 phys_addr);
+void     PmmPinPage(u64 phys_addr);    /* Pin a page so PmmFreePage will never release it */
 
 #endif

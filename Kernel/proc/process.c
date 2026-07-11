@@ -229,23 +229,40 @@ static void PsFreeAddressSpace(u64 page_table) {
                     u64 virt = ((u64)i << 39) | ((u64)j << 30) | ((u64)k << 21) | ((u64)l << 12);
                     u64 phys = pt[l] & ~0xFFFULL;
                     if (virt != phys && PmmIsPageTracked(phys)) {
+                        KdPrintf("[PsFree] Freeing USER page: phys=0x%llx (virt=0x%llx)\n", phys, virt);
                         PmmFreePage(phys);
                     }
                 }
                 if (PmmIsPageTracked(pt_phys)) {
+                    KdPrintf("[PsFree] Freeing PT page: phys=0x%llx\n", pt_phys);
                     PmmFreePage(pt_phys);
                 }
             }
             if (PmmIsPageTracked(pd_phys)) {
+                KdPrintf("[PsFree] Freeing PD page: phys=0x%llx\n", pd_phys);
                 PmmFreePage(pd_phys);
             }
         }
-        if (PmmIsPageTracked(pdpt_phys)) {
-            PmmFreePage(pdpt_phys);
-        }
+         /* Determine if PDPT contains kernel mappings (indices 256-511). If so, skip freeing. */
+         int pdpt_has_kernel = 0;
+         for (i32 kk = 256; kk < 512; kk++) {
+             if (pdpt[kk] & VMM_PRESENT) {
+                 pdpt_has_kernel = 1;
+                 break;
+             }
+         }
+         if (!pdpt_has_kernel) {
+             if (PmmIsPageTracked(pdpt_phys)) {
+                 KdPrintf("[PsFree] Freeing PDPT page: phys=0x%llx\n", pdpt_phys);
+                 PmmFreePage(pdpt_phys);
+             }
+         } else {
+             KdPrintf("[PsFree] Skipping PDPT free due to kernel mappings: phys=0x%llx\n", pdpt_phys);
+         }
     }
-    if (PmmIsPageTracked((u64)(usize)pml4)) {
-        PmmFreePage((u64)(usize)pml4);
+    if (PmmIsPageTracked(page_table)) {
+        KdPrintf("[PsFree] Freeing PML4 page: phys=0x%llx\n", page_table);
+        PmmFreePage(page_table);
     }
 }
 

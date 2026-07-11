@@ -144,14 +144,15 @@ static const char* GetExceptionName(u64 int_no) {
     return NULL;
 }
 
-static volatile i32 g_isr_nested = 0;
+static volatile i32 g_isr_nested_exc = 0;
+static volatile i32 g_isr_nested_irq = 0;
 
 __declspec(noinline) void IsrHandler(TrapFrame* frame) {
     if (frame->int_no < 32) {
-        if (g_isr_nested) {
+        if (g_isr_nested_exc) {
             while (1) HalHlt();
         }
-        g_isr_nested = 1;
+        g_isr_nested_exc = 1;
 
         u64 saved_cr3 = __readcr3();
         u64 kernel_cr3 = (u64)(usize)VmmGetPml4();
@@ -255,7 +256,7 @@ __declspec(noinline) void IsrHandler(TrapFrame* frame) {
         if (is_user) {
             FbPrintf("\nProcess crashed (exception %llu at RIP=0x%llx)\n",
                      frame->int_no, frame->rip);
-            g_isr_nested = 0;
+            g_isr_nested_exc = 0;
             SyscallKillCurrentProcess(frame);
             return;
         }
@@ -264,12 +265,12 @@ __declspec(noinline) void IsrHandler(TrapFrame* frame) {
     }
 
     if (frame->int_no >= 32 && frame->int_no < 48) {
-        if (g_isr_nested) {
+        if (g_isr_nested_irq) {
             /* Nested IRQ during critical kernel section - just ack PIC and return */
             PicSendEoi((u8)(frame->int_no - 32));
             return;
         }
-        g_isr_nested = 1;
+        g_isr_nested_irq = 1;
 
         u8 irq = (u8)(frame->int_no - 32);
 
@@ -279,7 +280,7 @@ __declspec(noinline) void IsrHandler(TrapFrame* frame) {
             KdPrintf("[ISR] Unhandled IRQ %u\n", irq);
         }
 
-        g_isr_nested = 0;
+        g_isr_nested_irq = 0;
         PicSendEoi(irq);
         return;
     }
