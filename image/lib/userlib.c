@@ -497,7 +497,7 @@ size_t fread(void* buf, size_t sz, size_t cnt, FILE* fp) {
 int fputc(int c, FILE* fp) {
     if (fp->fd == 1 || fp->fd == 2) {
         putchar((char)c);
-        return c;
+        return (unsigned char)c;
     }
     if (fp->is_write) {
         if (fp->write_pos >= fp->write_cap) {
@@ -512,7 +512,7 @@ int fputc(int c, FILE* fp) {
         if (fp->write_pos > fp->write_len) {
             fp->write_len = fp->write_pos;
         }
-        return c;
+        return (unsigned char)c;
     } else {
         return EOF;
     }

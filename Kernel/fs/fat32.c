@@ -437,7 +437,7 @@ static ntstatus FatParseDirEntry(u8* raw, FatDirEntry* out) {
 ntstatus Fat32OpenPath(const char* path) {
     if (!g_fat_initialized) return STATUS_UNSUCCESSFUL;
 
-    while (*path == '/') path++;
+    while (*path == '/' || *path == '\\') path++;
     if (*path == 0) return Fat32OpenRoot();
 
     ntstatus status = Fat32OpenRoot();
@@ -448,11 +448,11 @@ ntstatus Fat32OpenPath(const char* path) {
 
     while (*p) {
         i32 i = 0;
-        while (*p && *p != '/' && i < FAT_MAX_PATH - 1) {
+        while (*p && *p != '/' && *p != '\\' && i < FAT_MAX_PATH - 1) {
             component[i++] = *p++;
         }
         component[i] = 0;
-        if (*p == '/') p++;
+        if (*p == '/' || *p == '\\') p++;
 
         if (i == 0) continue;
 

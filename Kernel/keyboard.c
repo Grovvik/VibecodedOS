@@ -96,7 +96,6 @@ void KeInitKeyboard(void) {
 
 void KeyboardIrqHandler(TrapFrame* frame) {
     u8 scancode = HalInByte(KBD_DATA_PORT);
-    KdPrintf("[KBD] IRQ: scancode=0x%02x\n", scancode);
     u8 raw = scancode & 0x7F;
     u8 released = scancode & 0x80;
 

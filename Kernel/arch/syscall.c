@@ -115,12 +115,29 @@ static void* SysUserPtr(u64 user_addr) {
 }
 
 void SysResolvePath(const char* user_path, char* resolved) {
-    if (!user_path || !*user_path || user_path[0] == '/') {
-        RtStrCopy(resolved, user_path ? user_path : "");
+    if (!user_path) {
+        resolved[0] = 0;
         return;
     }
 
-    const char* src = user_path;
+    char normalized[FAT_MAX_PATH];
+    usize idx = 0;
+    while (user_path[idx] && idx < FAT_MAX_PATH - 1) {
+        if (user_path[idx] == '\\') {
+            normalized[idx] = '/';
+        } else {
+            normalized[idx] = user_path[idx];
+        }
+        idx++;
+    }
+    normalized[idx] = 0;
+
+    if (normalized[0] == '/') {
+        RtStrCopy(resolved, normalized);
+        return;
+    }
+
+    const char* src = normalized;
     if (src[0] == '.' && (src[1] == '/' || src[1] == '\0')) {
         src++;
         while (*src == '/') src++;
