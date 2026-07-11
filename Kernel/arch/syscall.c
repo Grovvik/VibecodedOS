@@ -120,40 +120,65 @@ void SysResolvePath(const char* user_path, char* resolved) {
         return;
     }
 
-    char normalized[FAT_MAX_PATH];
-    usize idx = 0;
-    while (user_path[idx] && idx < FAT_MAX_PATH - 1) {
-        if (user_path[idx] == '\\') {
-            normalized[idx] = '/';
-        } else {
-            normalized[idx] = user_path[idx];
-        }
-        idx++;
+    char temp[FAT_MAX_PATH];
+    usize i = 0;
+    while (user_path[i] && i < FAT_MAX_PATH - 1) {
+        if (user_path[i] == '\\') temp[i] = '/';
+        else temp[i] = user_path[i];
+        i++;
     }
-    normalized[idx] = 0;
+    temp[i] = 0;
 
-    if (normalized[0] == '/') {
-        RtStrCopy(resolved, normalized);
-        return;
-    }
-
-    const char* src = normalized;
-    if (src[0] == '.' && (src[1] == '/' || src[1] == '\0')) {
-        src++;
-        while (*src == '/') src++;
-    }
-
-    usize cwd_len = RtStrLen(g_current_directory);
-    if (cwd_len == 1 && g_current_directory[0] == '/') {
-        resolved[0] = '/';
-        RtStrCopy(resolved + 1, src);
+    char absolute[FAT_MAX_PATH * 2];
+    if (temp[0] == '/') {
+        RtStrCopy(absolute, temp);
     } else {
-        RtStrCopy(resolved, g_current_directory);
-        if (resolved[cwd_len - 1] != '/') {
-            resolved[cwd_len] = '/';
-            resolved[cwd_len + 1] = 0;
+        RtStrCopy(absolute, g_current_directory);
+        usize cwd_len = RtStrLen(absolute);
+        if (cwd_len > 0 && absolute[cwd_len - 1] != '/') {
+            absolute[cwd_len] = '/';
+            absolute[cwd_len + 1] = 0;
         }
-        RtStrConcat(resolved, src);
+        RtStrConcat(absolute, temp);
+    }
+
+    char* stack[32];
+    int stack_top = 0;
+    
+    char* p = absolute;
+    if (*p == '/') p++;
+    
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        
+        char* comp = p;
+        while (*p && *p != '/') p++;
+        if (*p) {
+            *p = 0;
+            p++;
+        }
+        
+        if (RtStrCompare(comp, ".") == 0) {
+            // Skip
+        } else if (RtStrCompare(comp, "..") == 0) {
+            if (stack_top > 0) {
+                stack_top--;
+            }
+        } else {
+            if (stack_top < 32) {
+                stack[stack_top++] = comp;
+            }
+        }
+    }
+    
+    resolved[0] = '/';
+    resolved[1] = 0;
+    for (int j = 0; j < stack_top; j++) {
+        RtStrConcat(resolved, stack[j]);
+        if (j < stack_top - 1) {
+            RtStrConcat(resolved, "/");
+        }
     }
 }
 
