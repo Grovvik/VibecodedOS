@@ -377,7 +377,7 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
                 status = Fat32OpenPath(g_current_directory);
         }
 
-        if (NT_SUCCESS(status)) {
+        if (NT_SUCCESS(status) && Fat32IsCurrentDirectory()) {
             fat_buf = (FatDirEntry*)KmAlloc(sizeof(FatDirEntry) * 256);
             if (fat_buf) {
                 u32 count = 256;

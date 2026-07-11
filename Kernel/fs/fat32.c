@@ -46,6 +46,7 @@ typedef struct {
 static FatInfo g_fat;
 static u32     g_current_cluster;
 static u32     g_current_file_size;
+static u8      g_current_is_directory;
 static i32     g_fat_initialized;
 
 static void FatGenerateShortName(const char* long_name, char* short_name);
@@ -390,6 +391,7 @@ ntstatus Fat32OpenRoot(void) {
         g_current_cluster = 0;
     }
     g_current_file_size = 0;
+    g_current_is_directory = 1;
     return STATUS_SUCCESS;
 }
 
@@ -438,7 +440,10 @@ ntstatus Fat32OpenPath(const char* path) {
     if (!g_fat_initialized) return STATUS_UNSUCCESSFUL;
 
     while (*path == '/' || *path == '\\') path++;
-    if (*path == 0) return Fat32OpenRoot();
+    if (*path == 0) {
+        g_current_is_directory = 1;
+        return Fat32OpenRoot();
+    }
 
     ntstatus status = Fat32OpenRoot();
     if (NT_ERROR(status)) return status;
@@ -468,6 +473,7 @@ ntstatus Fat32OpenPath(const char* path) {
             if (RtStrCompareI(entries[j].name, component) == 0) {
                 g_current_cluster = entries[j].first_cluster;
                 g_current_file_size = entries[j].file_size;
+                g_current_is_directory = entries[j].is_directory;
                 found = 1;
                 if (!entries[j].is_directory) { KmFree(entries); return STATUS_SUCCESS; }
                 break;
@@ -479,6 +485,7 @@ ntstatus Fat32OpenPath(const char* path) {
             if (RtMemCompare(short_entry, short_cmp, 11) == 0) {
                 g_current_cluster = entries[j].first_cluster;
                 g_current_file_size = entries[j].file_size;
+                g_current_is_directory = entries[j].is_directory;
                 found = 1;
                 if (!entries[j].is_directory) { KmFree(entries); return STATUS_SUCCESS; }
                 break;
@@ -489,6 +496,7 @@ ntstatus Fat32OpenPath(const char* path) {
         if (!found) return STATUS_NO_SUCH_FILE;
     }
 
+    g_current_is_directory = 1;
     return STATUS_SUCCESS;
 }
 
@@ -511,6 +519,7 @@ ntstatus Fat32OpenDir(const char* name) {
         if (RtStrCompareI(entries[j].name, name) == 0 && entries[j].is_directory) {
             g_current_cluster = entries[j].first_cluster;
             g_current_file_size = 0;
+            g_current_is_directory = 1;
             found = 1;
             break;
         }
@@ -519,6 +528,10 @@ ntstatus Fat32OpenDir(const char* name) {
 
     if (!found) return STATUS_NOT_FOUND;
     return STATUS_SUCCESS;
+}
+
+u8 Fat32IsCurrentDirectory(void) {
+    return g_current_is_directory;
 }
 
 static void FatExtractLfn(u8* raw, char* lfn_buf, u32 lfn_buf_size) {
@@ -1082,6 +1095,11 @@ ntstatus Fat32WriteFile(const char* path, const void* data, u32 size) {
                 }
 
                 if (match) {
+                    u8 entry_attr = g_sector_buf[d + 11];
+                    if (entry_attr & FAT_ATTR_DIRECTORY) {
+                        if (first_cluster) FatFreeClusterChain(first_cluster);
+                        return STATUS_ACCESS_DENIED;
+                    }
                     entry_sector = sector_base + s;
                     entry_offset = d;
                     found_existing = 1;

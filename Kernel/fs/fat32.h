@@ -52,6 +52,7 @@ ntstatus  Fat32ReadDir(FatDirEntry* entries, u32* count);
 ntstatus  Fat32ReadFile(void* buffer, u32* bytes_read);
 u32       Fat32GetFileSize(void);
 void      Fat32Close(void);
+u8        Fat32IsCurrentDirectory(void);
 ntstatus  Fat32ReadFileAt(const char* path, u32 offset, void* buffer, u32 count, u32* bytes_read);
 ntstatus  Fat32WriteFile(const char* path, const void* data, u32 size);
 ntstatus  Fat32DeleteFile(const char* path);
