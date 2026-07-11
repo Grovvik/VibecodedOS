@@ -21,7 +21,7 @@ move syscall.obj userlib\ >nul 2>&1
 if not exist userlib.obj echo FAILED: userlib.c && goto :fail
 move userlib.obj userlib\ >nul 2>&1
 
-for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell test audio_test nc test_read) do (
+for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell audio_test nc test_read) do (
     "%MSVC_BIN%\cl.exe" %CL_OPTS% %%f.c
     if exist %%f.obj (
         "%MSVC_BIN%\link.exe" %LINK_OPTS% %USERLIB% %%f.obj /out:%%f.exe

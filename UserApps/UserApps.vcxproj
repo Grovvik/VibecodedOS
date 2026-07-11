@@ -131,7 +131,6 @@
     <ClCompile Include="colors.c" />
     <ClCompile Include="cp.c" />
     <ClCompile Include="halt.c" />
-    <ClCompile Include="help.c" />
     <ClCompile Include="ls.c" />
     <ClCompile Include="meminfo.c" />
     <ClCompile Include="mkdir.c" />
