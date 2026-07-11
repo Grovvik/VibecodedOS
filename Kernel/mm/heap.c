@@ -75,16 +75,20 @@ static void HeapSplitBlock(HeapBlock* block, u64 size) {
 
 static void HeapCoalesce(HeapBlock* block) {
     if (block->next && block->next->magic == HEAP_BLOCK_MAGIC && block->next->free) {
-        HeapBlock* next = block->next;
-        block->size += sizeof(HeapBlock) + next->size;
-        block->next = next->next;
-        if (next->next) next->next->prev = block;
+        if ((u8*)block + sizeof(HeapBlock) + block->size == (u8*)block->next) {
+            HeapBlock* next = block->next;
+            block->size += sizeof(HeapBlock) + next->size;
+            block->next = next->next;
+            if (next->next) next->next->prev = block;
+        }
     }
     if (block->prev && block->prev->magic == HEAP_BLOCK_MAGIC && block->prev->free) {
-        HeapBlock* prev = block->prev;
-        prev->size += sizeof(HeapBlock) + block->size;
-        prev->next = block->next;
-        if (block->next) block->next->prev = prev;
+        if ((u8*)block->prev + sizeof(HeapBlock) + block->prev->size == (u8*)block) {
+            HeapBlock* prev = block->prev;
+            prev->size += sizeof(HeapBlock) + block->size;
+            prev->next = block->next;
+            if (block->next) block->next->prev = prev;
+        }
     }
 }
 
