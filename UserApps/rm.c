@@ -15,8 +15,7 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    u64 rc = syscall1(SYS_FS_DELETE, (u64)(usize)argv[0]);
-    if (rc == 0)
+    if (remove(argv[0]) == 0)
         printf("Deleted: %s\n", argv[0]);
     else
         printf("rm: failed to delete '%s'\n", argv[0]);

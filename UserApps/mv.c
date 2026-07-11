@@ -15,50 +15,43 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    u64 open_rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)argv[0]);
-    if (open_rc != 0) {
+    FILE* src_fp = fopen(argv[0], "rb");
+    if (!src_fp) {
         printf("mv: cannot open '%s'\n", argv[0]);
         return;
     }
 
-    u32 size = (u32)syscall0(SYS_FS_FILESIZE);
+    fseek(src_fp, 0, SEEK_END);
+    u32 size = (u32)ftell(src_fp);
     if (size == 0) {
-        syscall0(SYS_FS_CLOSEFILE);
+        fclose(src_fp);
         printf("mv: '%s' is empty\n", argv[0]);
         return;
     }
+    fseek(src_fp, 0, SEEK_SET);
 
-    u8* buf = (u8*)0;
-    u64 mmap_rc = syscall1(SYS_MMAP, (u64)size);
-    if (mmap_rc == 0) {
-        syscall0(SYS_FS_CLOSEFILE);
+    u8* buf = (u8*)malloc(size);
+    if (!buf) {
+        fclose(src_fp);
         print("mv: out of memory\n");
         return;
     }
-    buf = (u8*)mmap_rc;
 
-    u32 total_read = 0;
-    while (total_read < size) {
-        u32 to_read = size - total_read;
-        if (to_read > 4096) to_read = 4096;
-        u64 n = syscall2(SYS_FS_READFILE, (u64)(usize)(buf + total_read), (u64)to_read);
-        if (n == (u64)-1 || n == 0) break;
-        total_read += (u32)n;
-    }
-    syscall0(SYS_FS_CLOSEFILE);
+    size_t total_read = fread(buf, 1, size, src_fp);
+    fclose(src_fp);
 
     if (total_read == 0) {
+        free(buf);
         print("mv: failed to read file\n");
         return;
     }
 
+    // Determine destination path (if dst is a directory, append src filename)
     char dest_path[512];
     const char* src_name = argv[0];
     const char* p = argv[0];
     while (*p) {
-        if (*p == '/' || *p == '\\') {
-            src_name = p + 1;
-        }
+        if (*p == '/' || *p == '\\') src_name = p + 1;
         p++;
     }
 
@@ -76,17 +69,26 @@ void main(const char* args, const char* cwd, i32 argc) {
         strcpy(dest_path, argv[1]);
     }
 
-    u64 write_rc = syscall3(SYS_FS_WRITEFILE, (u64)(usize)dest_path, (u64)(usize)buf, (u64)total_read);
-    if (write_rc != 0) {
+    FILE* dst_fp = fopen(dest_path, "wb");
+    if (!dst_fp) {
+        free(buf);
+        printf("mv: cannot create destination '%s'\n", dest_path);
+        return;
+    }
+
+    size_t written = fwrite(buf, 1, total_read, dst_fp);
+    fclose(dst_fp);
+    free(buf);
+
+    if (written != total_read) {
         printf("mv: failed to write '%s'\n", dest_path);
         return;
     }
 
-    u64 del_rc = syscall1(SYS_FS_DELETE, (u64)(usize)argv[0]);
-    if (del_rc != 0) {
+    if (remove(argv[0]) != 0) {
         printf("mv: copied but failed to delete '%s'\n", argv[0]);
         return;
     }
 
-    printf("Moved %u bytes: %s -> %s\n", total_read, argv[0], dest_path);
+    printf("Moved %u bytes: %s -> %s\n", (u32)total_read, argv[0], dest_path);
 }

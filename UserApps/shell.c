@@ -198,92 +198,99 @@ static void shell_redirect_echo(i32 argc, char** argv, const char* outfile) {
 
     char resolved[FAT_MAX_PATH];
     resolve_path(outfile, resolved);
-    u64 rc = syscall3(SYS_FS_WRITEFILE, (u64)(usize)resolved, (u64)(usize)buf, (u64)pos);
-    if (rc == 0)
+    FILE* out = fopen(resolved, "w");
+    if (!out) {
+        printf("echo: cannot open '%s'\n", resolved);
+        return;
+    }
+    size_t written = fwrite(buf, 1, pos, out);
+    fclose(out);
+    if (written == pos)
         printf("Wrote %u bytes to %s\n", pos, outfile);
     else
         printf("Write failed\n");
 }
 
 static void shell_redirect_cat(const char* infile, const char* outfile) {
-    u64 open_rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)infile);
-    if (open_rc != 0) {
+    FILE* in = fopen(infile, "rb");
+    if (!in) {
         printf("cat: cannot open '%s'\n", infile);
         return;
     }
-    u32 size = (u32)syscall0(SYS_FS_FILESIZE);
-    if (size == 0) {
-        syscall0(SYS_FS_CLOSEFILE);
+    fseek(in, 0, SEEK_END);
+    long size = ftell(in);
+    if (size <= 0) {
+        fclose(in);
         printf("cat: '%s' is empty\n", infile);
         return;
     }
+    fseek(in, 0, SEEK_SET);
+
     u8* buf = (u8*)syscall1(SYS_MMAP, (u64)size);
     if (!buf) {
-        syscall0(SYS_FS_CLOSEFILE);
+        fclose(in);
         print("cat: out of memory\n");
         return;
     }
-    u32 total_read = 0;
-    while (total_read < size) {
-        u32 to_read = size - total_read;
-        if (to_read > 4096) to_read = 4096;
-        u64 n = syscall2(SYS_FS_READFILE, (u64)(usize)(buf + total_read), (u64)to_read);
-        if (n == (u64)-1 || n == 0) break;
-        total_read += (u32)n;
-    }
-    syscall0(SYS_FS_CLOSEFILE);
 
-    if (total_read > 0) {
-        char resolved[FAT_MAX_PATH];
-        resolve_path(outfile, resolved);
-        u64 rc = syscall3(SYS_FS_WRITEFILE, (u64)(usize)resolved, (u64)(usize)buf, (u64)total_read);
-        if (rc == 0)
-            printf("Copied %u bytes to %s\n", total_read, outfile);
-        else
-            printf("Write failed\n");
+    size_t total_read = fread(buf, 1, size, in);
+    fclose(in);
+    if (total_read == 0) {
+        printf("cat: read error on '%s'\n", infile);
+        return;
     }
+
+    char resolved[FAT_MAX_PATH];
+    resolve_path(outfile, resolved);
+    FILE* out = fopen(resolved, "w");
+    if (!out) {
+        printf("cat: cannot open output '%s'\n", resolved);
+        return;
+    }
+    size_t written = fwrite(buf, 1, total_read, out);
+    fclose(out);
+    if (written == total_read)
+        printf("Copied %zu bytes to %s\n", total_read, outfile);
+    else
+        printf("Write failed\n");
 }
 
 static void shell_execute(char* line);
 
 static int file_exists(const char* path) {
-    u64 rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)path);
-    if (rc == 0) {
-        syscall0(SYS_FS_CLOSEFILE);
+    FILE* f = fopen(path, "r");
+    if (f) {
+        fclose(f);
         return 1;
     }
     return 0;
 }
 
 static void shell_run_bat(const char* filepath) {
-    u64 open_rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)filepath);
-    if (open_rc != 0) {
+    FILE* f = fopen(filepath, "rb");
+    if (!f) {
         printf("bat: cannot open '%s'\n", filepath);
         return;
     }
 
-    u32 size = (u32)syscall0(SYS_FS_FILESIZE);
-    if (size == 0) {
-        syscall0(SYS_FS_CLOSEFILE);
+    // Determine file size
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    if (size <= 0) {
+        fclose(f);
         return;
     }
+    fseek(f, 0, SEEK_SET);
 
     u8* buf = (u8*)syscall1(SYS_MMAP, (u64)size + 1);
     if (!buf) {
-        syscall0(SYS_FS_CLOSEFILE);
+        fclose(f);
         print("bat: out of memory\n");
         return;
     }
 
-    u32 total_read = 0;
-    while (total_read < size) {
-        u32 to_read = size - total_read;
-        if (to_read > 4096) to_read = 4096;
-        u64 n = syscall2(SYS_FS_READFILE, (u64)(usize)(buf + total_read), (u64)to_read);
-        if (n == (u64)-1 || n == 0) break;
-        total_read += (u32)n;
-    }
-    syscall0(SYS_FS_CLOSEFILE);
+    size_t total_read = fread(buf, 1, size, f);
+    fclose(f);
     buf[total_read] = 0;
 
     char* line_start = (char*)buf;
@@ -429,9 +436,11 @@ static void shell_auto_run(i32 argc, char** argv) {
         }
     }
 
+    // Delegate external commands to userland programs via exec
     if (run_as_bat) {
         shell_run_bat(resolved_path);
     } else if (run_as_exe) {
+        // Execute the program and wait for it; report errors if exec fails or program exits non-zero
         u64 pid = syscall2(SYS_EXEC, (u64)(usize)resolved_path, (u64)(usize)args_buf);
         if (pid == (u64)-1) {
             setcolor(FB_RED, FB_BLACK);
@@ -439,7 +448,12 @@ static void shell_auto_run(i32 argc, char** argv) {
             setcolor(FB_WHITE, FB_BLACK);
             print("Type 'help' for available commands\n");
         } else {
-            syscall1(SYS_WAITPID, pid);
+            u64 exit_code = syscall1(SYS_WAITPID, pid);
+            if (exit_code != 0) {
+                setcolor(FB_RED, FB_BLACK);
+                printf("%s exited with code %llu\n", argv[0], exit_code);
+                setcolor(FB_WHITE, FB_BLACK);
+            }
         }
     }
 }
@@ -497,22 +511,12 @@ void main(const char* args, const char* cwd, i32 argc) {
     print("\n========================================\n");
     print("  ");
     setcolor(FB_YELLOW, FB_BLACK);
-    print("MicroNT v0.3 (Phase 2 - Ring3 + AHCI + FAT)");
+    print("MicroNT v0.4");
     setcolor(FB_CYAN, FB_BLACK);
     print("\n========================================\n\n");
     setcolor(FB_WHITE, FB_BLACK);
 
     char line[SHELL_MAX_LINE];
-
-    // Auto-run DOOM for testing
-    //{
-    //    char* auto_argv[4];
-    //    auto_argv[0] = "doom";
-    //    auto_argv[1] = "-iwad";
-    //    auto_argv[2] = "/bin/doom1.wad";
-    //    auto_argv[3] = 0;
-    //    shell_auto_run(3, auto_argv);
-    //}
 
     while (1) {
         shell_print_prompt();
