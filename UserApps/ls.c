@@ -13,6 +13,22 @@ void main(const char* args, const char* cwd, i32 argc) {
     if (ac > 0) {
         u64 rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)argv[0]);
         if (rc != 0) {
+            u64 file_rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)argv[0]);
+            if (file_rc == 0) {
+                u32 size = (u32)syscall0(SYS_FS_FILESIZE);
+                syscall0(SYS_FS_CLOSEFILE);
+                setcolor(FB_CYAN, FB_BLACK);
+                print("Directory listing\n");
+                setcolor(FB_WHITE, FB_BLACK);
+                const char* base_name = argv[0];
+                const char* p = argv[0];
+                while (*p) {
+                    if (*p == '/' || *p == '\\') base_name = p + 1;
+                    p++;
+                }
+                printf("  %s  %u\n", base_name, size);
+                return;
+            }
             printf("ls: cannot open '%s'\n", argv[0]);
             return;
         }

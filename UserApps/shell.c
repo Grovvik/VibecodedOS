@@ -154,22 +154,7 @@ static void shell_cmd_help(void) {
     print("  cd       - Change directory\n");
     print("  pwd      - Print working directory\n");
     print("  help     - Show this help\n");
-    print("  version  - Show version\n");
     print("  ls       - List directory\n");
-    print("  cat      - Display file\n");
-    print("  write    - Write to file\n");
-    print("  rm       - Delete file\n");
-    print("  mkdir    - Create directory\n");
-    print("  cp       - Copy file\n");
-    print("  mv       - Move/rename file\n");
-    print("  ps       - List processes\n");
-    print("  meminfo  - Show memory info\n");
-    print("  ticks    - Show tick count\n");
-    print("  sleep    - Sleep N ms\n");
-    print("  colors   - Show color palette\n");
-    print("  reboot   - Reboot system\n");
-    print("  halt     - Halt system\n");
-    print("\n  <name>   - Run /bin/<name>.exe\n");
 }
 
 static void resolve_path(const char* user_path, char* resolved) {
@@ -259,6 +244,90 @@ static void shell_redirect_cat(const char* infile, const char* outfile) {
     }
 }
 
+static void shell_execute(char* line);
+
+static int file_exists(const char* path) {
+    u64 rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)path);
+    if (rc == 0) {
+        syscall0(SYS_FS_CLOSEFILE);
+        return 1;
+    }
+    return 0;
+}
+
+static void shell_run_bat(const char* filepath) {
+    u64 open_rc = syscall1(SYS_FS_OPENFILE, (u64)(usize)filepath);
+    if (open_rc != 0) {
+        printf("bat: cannot open '%s'\n", filepath);
+        return;
+    }
+
+    u32 size = (u32)syscall0(SYS_FS_FILESIZE);
+    if (size == 0) {
+        syscall0(SYS_FS_CLOSEFILE);
+        return;
+    }
+
+    u8* buf = (u8*)syscall1(SYS_MMAP, (u64)size + 1);
+    if (!buf) {
+        syscall0(SYS_FS_CLOSEFILE);
+        print("bat: out of memory\n");
+        return;
+    }
+
+    u32 total_read = 0;
+    while (total_read < size) {
+        u32 to_read = size - total_read;
+        if (to_read > 4096) to_read = 4096;
+        u64 n = syscall2(SYS_FS_READFILE, (u64)(usize)(buf + total_read), (u64)to_read);
+        if (n == (u64)-1 || n == 0) break;
+        total_read += (u32)n;
+    }
+    syscall0(SYS_FS_CLOSEFILE);
+    buf[total_read] = 0;
+
+    char* line_start = (char*)buf;
+    char* p = (char*)buf;
+    while (p < (char*)buf + total_read) {
+        if (*p == '\n' || *p == '\r') {
+            char old_char = *p;
+            *p = 0;
+
+            u32 len = strlen(line_start);
+            while (len > 0 && (line_start[len - 1] == ' ' || line_start[len - 1] == '\t')) {
+                line_start[len - 1] = 0;
+                len--;
+            }
+            if (len > 0 && line_start[0] != '#' && line_start[0] != ';' &&
+                strncmp(line_start, "rem ", 4) != 0 && strcmp(line_start, "rem") != 0) {
+
+                setcolor(FB_YELLOW, FB_BLACK);
+                printf("> %s\n", line_start);
+                setcolor(FB_WHITE, FB_BLACK);
+
+                shell_execute(line_start);
+            }
+
+            *p = old_char;
+            line_start = p + 1;
+        }
+        p++;
+    }
+
+    if (line_start < (char*)buf + total_read) {
+        u32 len = strlen(line_start);
+        if (len > 0 && line_start[0] != '#' && line_start[0] != ';' &&
+            strncmp(line_start, "rem ", 4) != 0 && strcmp(line_start, "rem") != 0) {
+
+            setcolor(FB_YELLOW, FB_BLACK);
+            printf("> %s\n", line_start);
+            setcolor(FB_WHITE, FB_BLACK);
+
+            shell_execute(line_start);
+        }
+    }
+}
+
 static void shell_auto_run(i32 argc, char** argv) {
     char prog_name[SHELL_MAX_LINE];
     u32 len = strlen(argv[0]);
@@ -267,25 +336,15 @@ static void shell_auto_run(i32 argc, char** argv) {
         return;
     }
     memcpy(prog_name, argv[0], len);
-    if (len >= 4 && strcmp(argv[0] + len - 4, ".exe") == 0) {
-        prog_name[len] = 0;
-    } else {
-        memcpy(prog_name + len, ".exe", 5);
+    prog_name[len] = 0;
+
+    int is_path = 0;
+    for (u32 i = 0; i < len; i++) {
+        if (prog_name[i] == '/' || prog_name[i] == '\\' || prog_name[i] == '.') {
+            is_path = 1;
+            break;
+        }
     }
-
-    char prog_path[FAT_MAX_PATH];
-    prog_path[0] = '/';
-    prog_path[1] = 'b';
-    prog_path[2] = 'i';
-    prog_path[3] = 'n';
-    prog_path[4] = '/';
-    u32 i;
-    for (i = 0; prog_name[i] && i < FAT_MAX_PATH - 6; i++)
-        prog_path[5 + i] = prog_name[i];
-    prog_path[5 + i] = 0;
-
-    print(prog_name);
-    putchar('\n');
 
     char args_buf[512];
     args_buf[0] = 0;
@@ -298,14 +357,90 @@ static void shell_auto_run(i32 argc, char** argv) {
     }
     *ap = 0;
 
-    u64 pid = syscall2(SYS_EXEC, (u64)(usize)prog_path, (u64)(usize)args_buf);
-    if (pid == (u64)-1) {
-        setcolor(FB_RED, FB_BLACK);
-        printf("Unknown command: %s\n", argv[0]);
-        setcolor(FB_WHITE, FB_BLACK);
-        print("Type 'help' for available commands\n");
+    char resolved_path[FAT_MAX_PATH];
+    int run_as_bat = 0;
+    int run_as_exe = 0;
+
+    if (is_path) {
+        resolve_path(prog_name, resolved_path);
+        u32 rplen = strlen(resolved_path);
+        if (rplen >= 4 && strcmp(resolved_path + rplen - 4, ".bat") == 0) {
+            if (file_exists(resolved_path)) {
+                run_as_bat = 1;
+            }
+        } else if (rplen >= 4 && strcmp(resolved_path + rplen - 4, ".exe") == 0) {
+            if (file_exists(resolved_path)) {
+                run_as_exe = 1;
+            }
+        } else {
+            // Check with suffix
+            char check_path[FAT_MAX_PATH];
+            strcpy(check_path, resolved_path);
+            strcat(check_path, ".bat");
+            if (file_exists(check_path)) {
+                strcpy(resolved_path, check_path);
+                run_as_bat = 1;
+            } else {
+                strcpy(check_path, resolved_path);
+                strcat(check_path, ".exe");
+                if (file_exists(check_path)) {
+                    strcpy(resolved_path, check_path);
+                    run_as_exe = 1;
+                } else {
+                    // Just try as is
+                    run_as_exe = 1;
+                }
+            }
+        }
     } else {
-        syscall1(SYS_WAITPID, pid);
+        // Try local directories
+        char check_path[FAT_MAX_PATH];
+        
+        // Local .bat
+        resolve_path(prog_name, check_path);
+        strcat(check_path, ".bat");
+        if (file_exists(check_path)) {
+            strcpy(resolved_path, check_path);
+            run_as_bat = 1;
+        } else {
+            // Local .exe
+            resolve_path(prog_name, check_path);
+            strcat(check_path, ".exe");
+            if (file_exists(check_path)) {
+                strcpy(resolved_path, check_path);
+                run_as_exe = 1;
+            } else {
+                // /bin/ .bat
+                strcpy(check_path, "/bin/");
+                strcat(check_path, prog_name);
+                strcat(check_path, ".bat");
+                if (file_exists(check_path)) {
+                    strcpy(resolved_path, check_path);
+                    run_as_bat = 1;
+                } else {
+                    // /bin/ .exe
+                    strcpy(check_path, "/bin/");
+                    strcat(check_path, prog_name);
+                    strcat(check_path, ".exe");
+                    strcpy(resolved_path, check_path);
+                    run_as_exe = 1;
+                }
+            }
+        }
+    }
+
+    if (run_as_bat) {
+        shell_run_bat(resolved_path);
+    } else if (run_as_exe) {
+        u64 pid = syscall2(SYS_EXEC, (u64)(usize)resolved_path, (u64)(usize)args_buf);
+        if (pid == (u64)-1) {
+            setcolor(FB_RED, FB_BLACK);
+            printf("Unknown command: %s\n", argv[0]);
+            setcolor(FB_WHITE, FB_BLACK);
+            print("Type 'help' for available commands\n");
+        } else {
+            syscall1(SYS_WAITPID, pid);
+        }
     }
 }
 

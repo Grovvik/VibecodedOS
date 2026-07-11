@@ -52,9 +52,33 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    u64 write_rc = syscall3(SYS_FS_WRITEFILE, (u64)(usize)argv[1], (u64)(usize)buf, (u64)total_read);
+    char dest_path[512];
+    const char* src_name = argv[0];
+    const char* p = argv[0];
+    while (*p) {
+        if (*p == '/' || *p == '\\') {
+            src_name = p + 1;
+        }
+        p++;
+    }
+
+    u64 opendir_rc = syscall1(SYS_FS_OPENDIR, (u64)(usize)argv[1]);
+    if (opendir_rc == 0) {
+        syscall0(SYS_FS_CLOSEDIR);
+        strcpy(dest_path, argv[1]);
+        u32 len = strlen(dest_path);
+        if (len > 0 && dest_path[len - 1] != '/' && dest_path[len - 1] != '\\') {
+            dest_path[len] = '/';
+            dest_path[len + 1] = 0;
+        }
+        strcat(dest_path, src_name);
+    } else {
+        strcpy(dest_path, argv[1]);
+    }
+
+    u64 write_rc = syscall3(SYS_FS_WRITEFILE, (u64)(usize)dest_path, (u64)(usize)buf, (u64)total_read);
     if (write_rc != 0) {
-        printf("mv: failed to write '%s'\n", argv[1]);
+        printf("mv: failed to write '%s'\n", dest_path);
         return;
     }
 
@@ -64,5 +88,5 @@ void main(const char* args, const char* cwd, i32 argc) {
         return;
     }
 
-    printf("Moved %u bytes: %s -> %s\n", total_read, argv[0], argv[1]);
+    printf("Moved %u bytes: %s -> %s\n", total_read, argv[0], dest_path);
 }
