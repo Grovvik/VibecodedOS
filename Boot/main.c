@@ -306,74 +306,6 @@ static EFI_STATUS LoadKernel(EFI_HANDLE ImageHandle, BootInfo* bi) {
     return EFI_SUCCESS;
 }
 
-static EFI_STATUS LoadUserProgram(EFI_HANDLE ImageHandle, BootInfo* bi) {
-    EFI_LOADED_IMAGE* loaded_image;
-    EFI_STATUS status = uefi_call_wrapper(BS->OpenProtocol, 6,
-        ImageHandle, &gEfiLoadedImageProtocolGuid,
-        (void**)&loaded_image, ImageHandle, NULL,
-        EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-    if (EFI_ERROR(status)) return status;
-
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs;
-    status = uefi_call_wrapper(BS->OpenProtocol, 6,
-        loaded_image->DeviceHandle,
-        &gEfiSimpleFileSystemProtocolGuid,
-        (void**)&fs, ImageHandle, NULL,
-        EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-    if (EFI_ERROR(status)) return status;
-
-    EFI_FILE_HANDLE root;
-    status = uefi_call_wrapper(fs->OpenVolume, 2, fs, &root);
-    if (EFI_ERROR(status)) return status;
-
-    EFI_FILE_HANDLE file;
-    status = uefi_call_wrapper(root->Open, 5,
-        root, &file, L"\\test_user.exe",
-        EFI_FILE_MODE_READ, 0);
-    uefi_call_wrapper(root->Close, 1, root);
-    if (EFI_ERROR(status)) {
-        Print(L"  test_user.exe not found, skipping user program load\n");
-        return status;
-    }
-
-    UINTN info_size = sizeof(EFI_FILE_INFO) + 512;
-    EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)AllocatePool(info_size);
-    if (!file_info) {
-        uefi_call_wrapper(file->Close, 1, file);
-        return EFI_OUT_OF_RESOURCES;
-    }
-    status = uefi_call_wrapper(file->GetInfo, 4,
-        file, &gEfiFileInfoGuid, &info_size, file_info);
-    if (EFI_ERROR(status)) {
-        FreePool(file_info);
-        uefi_call_wrapper(file->Close, 1, file);
-        return status;
-    }
-
-    UINTN file_size = (UINTN)file_info->FileSize;
-    FreePool(file_info);
-
-    void* buffer = AllocatePool(file_size);
-    if (!buffer) {
-        uefi_call_wrapper(file->Close, 1, file);
-        return EFI_OUT_OF_RESOURCES;
-    }
-
-    UINTN read_size = file_size;
-    status = uefi_call_wrapper(file->Read, 3, file, &read_size, buffer);
-    uefi_call_wrapper(file->Close, 1, file);
-
-    if (EFI_ERROR(status) || read_size != file_size) {
-        FreePool(buffer);
-        return status;
-    }
-
-    bi->user_program_base = (u64)(usize)buffer;
-    bi->user_program_size = (u64)file_size;
-    Print(L"  User program loaded: base=0x%lx size=%lu\n", bi->user_program_base, bi->user_program_size);
-    return EFI_SUCCESS;
-}
-
 static void GetRSDP(BootInfo* bi) {
     bi->rsdp = 0;
 
@@ -462,24 +394,21 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable
     BootInfo boot_info;
     BootMemSet(&boot_info, 0, sizeof(boot_info));
 
-    Print(L"[1/5] Getting framebuffer info...\n");
+    Print(L"[1/3] Getting framebuffer info...\n");
     EFI_STATUS status = GetFrameBufferInfo(&boot_info);
     if (EFI_ERROR(status)) {
         Print(L"FATAL: Cannot get framebuffer: %r\n", status);
         return status;
     }
 
-    Print(L"[2/5] Loading kernel from ESP:\\EFI\\OS\\Kernel.exe...\n");
+    Print(L"[2/3] Loading kernel from ESP:\\EFI\\OS\\Kernel.exe...\n");
     status = LoadKernel(ImageHandle, &boot_info);
     if (EFI_ERROR(status)) {
         Print(L"FATAL: Cannot load kernel: %r\n", status);
         return status;
     }
 
-    Print(L"[2a] Loading user program...\n");
-    LoadUserProgram(ImageHandle, &boot_info);
-
-    Print(L"[3/5] Finding RSDP...\n");
+    Print(L"[3/3] Finding RSDP...\n");
     GetRSDP(&boot_info);
 
     status = ExitBootServicesAndJump(ImageHandle, &boot_info);
