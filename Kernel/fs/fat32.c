@@ -1576,38 +1576,3 @@ mkdir_done_scan:
     KdPrintf("[FAT] CreateDirectory: %s cluster=%u ok\n", dirname, new_cluster);
     return STATUS_SUCCESS;
 }
-
-void Fat32Test(void) {
-    if (!g_fat_initialized) {
-        KdPrintf("[FAT] Not initialized, skipping test\n");
-        return;
-    }
-
-    ntstatus status = Fat32OpenRoot();
-    if (NT_ERROR(status)) {
-        KdPrintf("[FAT] Failed to open root: 0x%08x\n", status);
-        return;
-    }
-
-    FatDirEntry* entries = (FatDirEntry*)KmAlloc(sizeof(FatDirEntry) * 64);
-    if (!entries) { KdPrintf("[FAT] Out of memory\n"); Fat32Close(); return; }
-    u32 count = 64;
-    status = Fat32ReadDir(entries, &count);
-    if (NT_ERROR(status)) {
-        KdPrintf("[FAT] Failed to read root dir: 0x%08x\n", status);
-        KmFree(entries);
-        Fat32Close();
-        return;
-    }
-
-    KdPrintf("[FAT] Root directory: %u entries\n", count);
-    for (u32 i = 0; i < count; i++) {
-        KdPrintf("[FAT]   %s %s cluster=%u size=%u\n",
-            entries[i].is_directory ? "[DIR]" : "     ",
-            entries[i].name,
-            entries[i].first_cluster,
-            entries[i].file_size);
-    }
-    KmFree(entries);
-    Fat32Close();
-}

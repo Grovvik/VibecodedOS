@@ -58,6 +58,4 @@ ntstatus  Fat32WriteFile(const char* path, const void* data, u32 size);
 ntstatus  Fat32DeleteFile(const char* path);
 ntstatus  Fat32CreateDirectory(const char* path);
 
-void      Fat32Test(void);
-
 #endif
