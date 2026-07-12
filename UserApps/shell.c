@@ -108,8 +108,22 @@ static void shell_cmd_cd(i32 argc, char** argv) {
 
     char full_path[FAT_MAX_PATH];
     if (target[0] == '/') {
+        if (strlen(target) >= FAT_MAX_PATH - 32) {
+            setcolor(FB_RED, FB_BLACK);
+            printf("cd: Path too long\n");
+            setcolor(FB_WHITE, FB_BLACK);
+            return;
+        }
         strcpy(full_path, target);
     } else {
+        u32 cwd_len = strlen(g_cwd);
+        u32 target_len = strlen(target);
+        if (cwd_len + 1 + target_len >= FAT_MAX_PATH - 32) {
+            setcolor(FB_RED, FB_BLACK);
+            printf("cd: Path too long\n");
+            setcolor(FB_WHITE, FB_BLACK);
+            return;
+        }
         strcpy(full_path, g_cwd);
         u32 len = strlen(full_path);
         if (len > 1 && full_path[len - 1] != '/') {
@@ -416,11 +430,14 @@ void main(const char* args, const char* cwd, i32 argc) {
         strcpy(g_cwd, cwd);
     }
 
+    char os_version[64] = "unknown";
+    syscall2(SYS_SYSTEM, SYS_SYS_VERSION, (u64)(usize)os_version);
+
     setcolor(FB_CYAN, FB_BLACK);
-    print("\n========================================\n");
+    print("========================================\n");
     print("  ");
     setcolor(FB_YELLOW, FB_BLACK);
-    print("MicroNT v0.4");
+    printf("MicroNT %s\n", os_version);
     setcolor(FB_CYAN, FB_BLACK);
     print("\n========================================\n\n");
     setcolor(FB_WHITE, FB_BLACK);
