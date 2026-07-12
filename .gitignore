@@ -53,6 +53,7 @@ dkms.conf
 x64/
 .vs/
 bin/
+image/
 
 # debug information files
 *.dwo
