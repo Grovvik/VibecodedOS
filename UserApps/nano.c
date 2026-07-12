@@ -1,6 +1,8 @@
 #include "userlib.h"
 #include "../Kernel/font8x16.h"
 
+#define NANO_VERSION "1.1";
+
 #define MAX_LINES 4096
 #define MAX_LINE_LEN 256
 
@@ -300,7 +302,7 @@ static void update_scroll() {
 
 static void draw_screen_full() {
     char title[128];
-    snprintf(title, sizeof(title), "  Nano 1.0  |  File: %-20s", g_filename[0] ? g_filename : "New Buffer");
+    snprintf(title, sizeof(title), "  Nano %s  |  File: %s", NANO_VERSION, g_filename[0] ? g_filename : "New Buffer");
     draw_padded_string(title, 0, FB_BLACK, FB_WHITE);
     
     int text_rows = g_screen_rows - 3;
@@ -745,6 +747,11 @@ void main(const char* args, const char* cwd, i32 argc) {
         strncpy(argbuf, args, sizeof(argbuf) - 1);
         argbuf[sizeof(argbuf) - 1] = 0;
         ac = parse_args(argbuf, argv, 16);
+    }
+
+    if (ac > 0 && (strcmp(argv[0], "--version") == 0 || strcmp(argv[0], "-v") == 0)) {
+        printf("Nano %s\n", NANO_VERSION);
+        return;
     }
     
     KeyEvent dummy;
