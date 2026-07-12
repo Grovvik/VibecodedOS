@@ -394,6 +394,19 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
             ret = (u64)Ipv4OurIp();
             break;
         }
+        case SYS_SYS_VERSION: {
+            char* ubuf = (char*)SysUserPtr(frame->rcx);
+            if (ubuf) {
+                RtStrCopy(ubuf, "MicroNT OS v0.4");
+            }
+            ret = 0;
+            break;
+        }
+        case SYS_SYS_DISKFREE: {
+            extern u64 Fat32GetFreeSize(void);
+            ret = Fat32GetFreeSize();
+            break;
+        }
         default:
             KdPrintf("[SYSCALL] Unknown SYS_SYSTEM subcommand %llu\n", cmd);
             ret = (u64)-1;

@@ -58,6 +58,8 @@
 #define SYS_SYS_MEMUSED     5
 #define SYS_SYS_DISKSIZE    6
 #define SYS_SYS_IP          7
+#define SYS_SYS_VERSION     8
+#define SYS_SYS_DISKFREE    9
 
 #define PS_INFO_MAX         32
 
