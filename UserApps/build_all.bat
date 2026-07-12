@@ -3,7 +3,7 @@ set MSVC=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\1
 set MSVC_BIN=%MSVC%\bin\Hostx64\x64
 set MSVC_INC=%MSVC%\include
 set CL_OPTS=/c /O1 /GS- /TC /Gm- /nologo /fp:precise /Oi- /Gs4096 /DNDEBUG /Iuserlib /Iuserlib/wolfssl /DWOLFSSL_USER_SETTINGS /I"%MSVC_INC%"
-set LINK_OPTS=/subsystem:native /entry:_start /fixed /base:0x400000 /align:4096 /nodefaultlib /merge:.rdata=.text
+set LINK_OPTS=/subsystem:native /entry:_start /fixed /nologo /base:0x400000 /align:4096 /nodefaultlib /merge:.rdata=.text
 set USERLIB=userlib\start.obj userlib\syscall.obj userlib\userlib.obj userlib\tls_wrapper.obj userlib\hmac.obj userlib\coding.obj userlib\error.obj userlib\kdf.obj userlib\wolfmath.obj userlib\memory.obj userlib\logging.obj userlib\wc_port.obj userlib\sha256.obj userlib\sha512.obj userlib\hash.obj userlib\asn.obj userlib\aes.obj userlib\tfm.obj userlib\random.obj userlib\ecc.obj userlib\curve25519.obj userlib\fe_operations.obj userlib\rsa.obj userlib\signature.obj userlib\ssl.obj userlib\internal.obj userlib\tls.obj userlib\wolfio.obj userlib\tls13.obj userlib\keys.obj
 
 del *.obj *.exe *.map 2>nul
