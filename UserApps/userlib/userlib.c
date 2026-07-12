@@ -442,7 +442,7 @@ int feof(FILE* fp) { return fp ? fp->eof : 0; }
 int ferror(FILE* fp) { return fp ? fp->err : 0; }
 
 int fgetc(FILE* fp) {
-    if (fp->fd == 0) {
+    if (fp == stdin) {
         return (int)getchar();
     }
     unsigned char c;
@@ -476,7 +476,7 @@ size_t fread(void* buf, size_t sz, size_t cnt, FILE* fp) {
 }
 
 int fputc(int c, FILE* fp) {
-    if (fp->fd == 1 || fp->fd == 2) {
+    if (fp == stdout || fp == stderr) {
         putchar((char)c);
         return (unsigned char)c;
     }
@@ -1441,12 +1441,19 @@ void path_resolve(const char* cwd, const char* user_path, char* out) {
     }
     size_t pos = 0;
     for (int i = 0; i < nparts; i++) {
-        out[pos++] = '/';
         size_t len = strlen(parts[i]);
+        if (pos + 1 + len >= FAT_MAX_PATH - 32) {
+            break;
+        }
+        out[pos++] = '/';
         memcpy(out + pos, parts[i], len);
         pos += len;
     }
-    out[pos] = 0;
+    if (pos == 0) {
+        out[0] = '/'; out[1] = 0;
+    } else {
+        out[pos] = 0;
+    }
 }
 
 const char* path_basename(const char* path) {

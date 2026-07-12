@@ -59,6 +59,11 @@ typedef u64 usize;
 #define SYS_SYS_TICKS       2
 #define SYS_SYS_MEMINFO     3
 #define SYS_SYS_PS          4
+#define SYS_SYS_MEMUSED     5
+#define SYS_SYS_DISKSIZE    6
+#define SYS_SYS_IP          7
+#define SYS_SYS_VERSION     8
+#define SYS_SYS_DISKFREE    9
 
 #define DIR_MAX_NAME 256
 
