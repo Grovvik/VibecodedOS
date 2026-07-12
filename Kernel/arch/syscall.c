@@ -174,12 +174,20 @@ void SysResolvePath(const char* user_path, char* resolved) {
     
     resolved[0] = '/';
     resolved[1] = 0;
+    usize pos = 1;
     for (int j = 0; j < stack_top; j++) {
-        RtStrConcat(resolved, stack[j]);
+        usize len = RtStrLen(stack[j]);
+        if (pos + len >= FAT_MAX_PATH - 32) {
+            break;
+        }
+        RtMemCopy(resolved + pos, stack[j], len);
+        pos += len;
         if (j < stack_top - 1) {
-            RtStrConcat(resolved, "/");
+            if (pos + 1 >= FAT_MAX_PATH - 32) break;
+            resolved[pos++] = '/';
         }
     }
+    resolved[pos] = 0;
 }
 
 static FatDirEntry* g_dir_entries;
@@ -195,6 +203,20 @@ static KFileDesc g_fd_table[MAX_FD];
 __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
     HalSti();
     u64 syscall_num = frame->rax;
+    
+    // Disable interrupts for filesystem and exec system calls to ensure atomicity
+    // and protect the shared global filesystem state/buffer from preemption/race conditions.
+    if (syscall_num == SYS_FS_OPENDIR || syscall_num == SYS_FS_READDIR ||
+        syscall_num == SYS_FS_CLOSEDIR || syscall_num == SYS_FS_OPENFILE ||
+        syscall_num == SYS_FS_READFILE || syscall_num == SYS_FS_FILESIZE ||
+        syscall_num == SYS_FS_CLOSEFILE || syscall_num == SYS_FS_WRITEFILE ||
+        syscall_num == SYS_FS_DELETE || syscall_num == SYS_FS_MKDIR ||
+        syscall_num == SYS_EXEC || syscall_num == SYS_OPEN ||
+        syscall_num == SYS_READ || syscall_num == SYS_LSEEK ||
+        syscall_num == SYS_CLOSEFD) {
+        HalCli();
+    }
+
     u64 ret = 0;
 
     KThread* cur_t = PsGetCurrentThread();
@@ -359,6 +381,19 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
             ret = (u64)idx;
             break;
         }
+        case SYS_SYS_MEMUSED: {
+            ret = PmmGetUsedPages() * PAGE_SIZE;
+            break;
+        }
+        case SYS_SYS_DISKSIZE: {
+            ret = Fat32GetVolumeSize();
+            break;
+        }
+        case SYS_SYS_IP: {
+            extern u32 Ipv4OurIp(void);
+            ret = (u64)Ipv4OurIp();
+            break;
+        }
         default:
             KdPrintf("[SYSCALL] Unknown SYS_SYSTEM subcommand %llu\n", cmd);
             ret = (u64)-1;
@@ -467,9 +502,16 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
         ntstatus status = Fat32OpenPath(resolved);
         if (NT_SUCCESS(status)) {
             u32 size = Fat32GetFileSize();
-            if (size == 0 || size > 16777216) {
+            if (size > 16777216) {
                 Fat32Close();
                 ret = (u64)-1; break;
+            }
+            if (size == 0) {
+                g_file_data = (u8*)KmAlloc(1);
+                g_file_size = 0;
+                Fat32Close();
+                ret = 0;
+                break;
             }
             g_file_data = (u8*)KmAlloc(size);
             if (!g_file_data) { Fat32Close(); ret = (u64)-1; break; }
@@ -514,7 +556,7 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
         break;
     }
     case SYS_FS_WRITEFILE: {
-        if (frame->rbx == 0 || frame->rcx == 0 || frame->rdx == 0) {
+        if (frame->rbx == 0 || frame->rcx == 0) {
             ret = (u64)-1; break;
         }
         const char* wpath = (const char*)SysUserPtr(frame->rbx);
@@ -770,7 +812,7 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
         u32 fsize = Fat32GetFileSize();
         Fat32Close();
 
-        if (fsize == 0 || fsize > 16777216) { ret = (u64)-1; break; }
+        if (fsize > 16777216) { ret = (u64)-1; break; }
 
         i32 fd = -1;
         for (i32 i = 0; i < MAX_FD; i++) {
@@ -811,14 +853,6 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
             if (t && t->process) __writecr3(t->process->page_table);
             ntstatus status = Fat32ReadFileAt(f->path, f->pos, rbuf, rcount, &bytes_read);
             if (t && t->process) __writecr3(saved_cr3);
-
-            KdPrintf("[DEBUG SYS_READ] fd=%d path='%s' pos=%u rcount=%u bytes_read=%u status=0x%x\n",
-                     fd, f->path, f->pos, rcount, bytes_read, status);
-            if (bytes_read > 0) {
-                u8* p_user = (u8*)rbuf;
-                KdPrintf("[DEBUG SYS_READ] user first bytes: 0x%02x 0x%02x 0x%02x 0x%02x\n",
-                         p_user[0], p_user[1], p_user[2], p_user[3]);
-            }
 
             if (NT_ERROR(status)) { ret = (u64)-1; break; }
             f->pos += bytes_read;
