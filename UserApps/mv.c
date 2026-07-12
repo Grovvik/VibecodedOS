@@ -33,26 +33,24 @@ void main(const char* args, const char* cwd, i32 argc) {
     u32 size = (u32)ftell(src_fp);
     fseek(src_fp, 0, SEEK_SET);
 
-    if (size == 0) {
+    u8* buf = NULL;
+    size_t total_read = 0;
+    if (size > 0) {
+        buf = (u8*)malloc(size);
+        if (!buf) {
+            fclose(src_fp);
+            print("mv: out of memory\n");
+            return;
+        }
+        total_read = fread(buf, 1, size, src_fp);
         fclose(src_fp);
-        printf("mv: '%s' is empty\n", src_abs);
-        return;
-    }
-
-    u8* buf = (u8*)malloc(size);
-    if (!buf) {
+        if (total_read == 0) {
+            free(buf);
+            print("mv: failed to read file\n");
+            return;
+        }
+    } else {
         fclose(src_fp);
-        print("mv: out of memory\n");
-        return;
-    }
-
-    size_t total_read = fread(buf, 1, size, src_fp);
-    fclose(src_fp);
-
-    if (total_read == 0) {
-        free(buf);
-        print("mv: failed to read file\n");
-        return;
     }
 
     // -----------------------------------------------------------------------
@@ -83,14 +81,17 @@ void main(const char* args, const char* cwd, i32 argc) {
     // -----------------------------------------------------------------------
     FILE* dst_fp = fopen(final_dst, "wb");
     if (!dst_fp) {
-        free(buf);
+        if (buf) free(buf);
         printf("mv: cannot create '%s'\n", final_dst);
         return;
     }
 
-    size_t written = fwrite(buf, 1, total_read, dst_fp);
+    size_t written = 0;
+    if (size > 0) {
+        written = fwrite(buf, 1, total_read, dst_fp);
+    }
     fclose(dst_fp);
-    free(buf);
+    if (buf) free(buf);
 
     if (written != total_read) {
         printf("mv: write error on '%s'\n", final_dst);
