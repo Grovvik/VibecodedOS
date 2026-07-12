@@ -1,7 +1,7 @@
 #include "userlib.h"
 #include "../Kernel/font8x16.h"
 
-#define NANO_VERSION "1.1";
+#define NANO_VERSION "1.1"
 
 #define MAX_LINES 4096
 #define MAX_LINE_LEN 256
