@@ -35,7 +35,7 @@ for %%w in (%WOLFSSL_FILES%) do (
     )
 )
 
-for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell nc https curl nano fastfetch) do (
+for %%f in (help version ticks reboot halt meminfo ps colors ls cat pwd write rm mkdir cp mv sleep shell nc curl nano) do (
     "%MSVC_BIN%\cl.exe" %CL_OPTS% %%f.c
     if exist %%f.obj (
         "%MSVC_BIN%\link.exe" %LINK_OPTS% %USERLIB% %%f.obj /out:%%f.exe /map:%%f.map
