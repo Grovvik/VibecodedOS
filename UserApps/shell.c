@@ -437,7 +437,7 @@ void main(const char* args, const char* cwd, i32 argc) {
     print("========================================\n");
     print("  ");
     setcolor(FB_YELLOW, FB_BLACK);
-    printf("MicroNT %s\n", os_version);
+    printf("MicroNT %s", os_version);
     setcolor(FB_CYAN, FB_BLACK);
     print("\n========================================\n\n");
     setcolor(FB_WHITE, FB_BLACK);
