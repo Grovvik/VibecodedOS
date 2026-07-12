@@ -28,27 +28,26 @@ void main(const char* args, const char* cwd, i32 argc) {
 
     fseek(src_fp, 0, SEEK_END);
     u32 size = (u32)ftell(src_fp);
-    if (size == 0) {
-        fclose(src_fp);
-        printf("cp: '%s' is empty\n", src_abs);
-        return;
-    }
     fseek(src_fp, 0, SEEK_SET);
 
-    u8* buf = (u8*)malloc(size);
-    if (!buf) {
+    u8* buf = NULL;
+    size_t total_read = 0;
+    if (size > 0) {
+        buf = (u8*)malloc(size);
+        if (!buf) {
+            fclose(src_fp);
+            print("cp: out of memory\n");
+            return;
+        }
+        total_read = fread(buf, 1, size, src_fp);
         fclose(src_fp);
-        print("cp: out of memory\n");
-        return;
-    }
-
-    size_t total_read = fread(buf, 1, size, src_fp);
-    fclose(src_fp);
-
-    if (total_read == 0) {
-        free(buf);
-        print("cp: failed to read file\n");
-        return;
+        if (total_read == 0) {
+            free(buf);
+            print("cp: failed to read file\n");
+            return;
+        }
+    } else {
+        fclose(src_fp);
     }
 
     // If dst is a directory, append source filename
@@ -68,14 +67,17 @@ void main(const char* args, const char* cwd, i32 argc) {
 
     FILE* dst_fp = fopen(final_dst, "wb");
     if (!dst_fp) {
-        free(buf);
+        if (buf) free(buf);
         printf("cp: cannot create '%s'\n", final_dst);
         return;
     }
 
-    size_t written = fwrite(buf, 1, total_read, dst_fp);
+    size_t written = 0;
+    if (size > 0) {
+        written = fwrite(buf, 1, total_read, dst_fp);
+    }
     fclose(dst_fp);
-    free(buf);
+    if (buf) free(buf);
 
     if (written == total_read)
         printf("Copied %u bytes: %s -> %s\n", (u32)total_read, src_abs, final_dst);
