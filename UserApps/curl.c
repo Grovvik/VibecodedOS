@@ -372,17 +372,6 @@ static int do_request(const CurlOpts* opts, const ParsedUrl* url,
         return -1;
     }
 
-    if (verbose) {
-        /* Print request lines prefixed with '>' */
-        printf("> %s %s HTTP/1.1\n", opts->method, url->path);
-        printf("> Host: %s\n", url->host);
-        for (int i = 0; i < opts->header_count; i++)
-            printf("> %s\n", opts->headers[i]);
-        if (opts->body && opts->body_len > 0)
-            printf("> [body: %d bytes]\n", opts->body_len);
-        printf(">\n");
-    }
-
     /* Connect */
     int sock = net_socket();
     if (sock < 0) {
@@ -412,8 +401,17 @@ static int do_request(const CurlOpts* opts, const ParsedUrl* url,
         return -1;
     }
 
-    if (!silent && verbose)
+    if (!silent && verbose) {
+        /* Print request lines prefixed with '>' — now that connection is up */
+        printf("> %s %s HTTP/1.1\n", opts->method, url->path);
+        printf("> Host: %s\n", url->host);
+        for (int i = 0; i < opts->header_count; i++)
+            printf("> %s\n", opts->headers[i]);
+        if (opts->body && opts->body_len > 0)
+            printf("> [body: %d bytes]\n", opts->body_len);
+        printf(">\n");
         printf("* Connected\n");
+    }
 
     /* TLS */
     Conn conn;
@@ -512,13 +510,15 @@ static int do_request(const CurlOpts* opts, const ParsedUrl* url,
  * Main
  * ---------------------------------------------------------------------- */
 void main(const char* args, const char* cwd, i32 rargc) {
-    char* argv[16];
-    i32 argc = 0;
+    char* argv[17];
+    i32 argc = 1;
     char argbuf[512];
+
+    argv[0] = "curl";
 
     if (args && *args) {
         strcpy(argbuf, args);
-        argc = parse_args(argbuf, argv, 16);
+        argc += parse_args(argbuf, argv + 1, 15);
     }
 
     if (argc < 2) {
