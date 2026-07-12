@@ -57,5 +57,7 @@ ntstatus  Fat32ReadFileAt(const char* path, u32 offset, void* buffer, u32 count,
 ntstatus  Fat32WriteFile(const char* path, const void* data, u32 size);
 ntstatus  Fat32DeleteFile(const char* path);
 ntstatus  Fat32CreateDirectory(const char* path);
+u64       Fat32GetVolumeSize(void);
+u64       Fat32GetFreeSize(void);
 
 #endif

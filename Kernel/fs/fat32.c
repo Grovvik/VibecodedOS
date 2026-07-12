@@ -48,8 +48,10 @@ static u32     g_current_cluster;
 static u32     g_current_file_size;
 static u8      g_current_is_directory;
 static i32     g_fat_initialized;
+static u32     g_last_allocated_cluster = 2;
 
 static void FatGenerateShortName(const char* long_name, char* short_name);
+static u32 FatEofMarker(void);
 
 static u8* g_sector_buf;
 
@@ -370,6 +372,21 @@ void Fat32Init(u64 partition_start_lba) {
     }
 
     g_fat_initialized = 1;
+
+    // Scan FAT backwards to find the highest allocated cluster.
+    // This initializes g_last_allocated_cluster to start allocations after existing files,
+    // avoiding immediate reuse of recently freed low-numbered clusters and preventing QEMU vvfat crashes.
+    u32 highest_used = 2;
+    u32 max_cluster = total_clusters + 2;
+    for (u32 c = max_cluster - 1; c >= 2; c--) {
+        u32 val = FatGetFatEntry(c);
+        if (val != 0 && val < FatEofMarker()) {
+            highest_used = c;
+            break;
+        }
+        if (c == 2) break;
+    }
+    g_last_allocated_cluster = highest_used + 1;
 
     const char* type_str = type == FAT_TYPE_12 ? "FAT12" :
         type == FAT_TYPE_16 ? "FAT16" : "FAT32";
@@ -892,12 +909,27 @@ static u32 FatAllocateCluster(void) {
     u32 data_sectors = g_fat.total_sectors - g_fat.data_start_sector;
     u32 max_cluster = data_sectors / g_fat.sectors_per_cluster + 2;
 
-    for (u32 c = 2; c < max_cluster; c++) {
+    u32 start = g_last_allocated_cluster;
+    if (start < 2 || start >= max_cluster) start = 2;
+
+    // Scan from start to end of partition
+    for (u32 c = start; c < max_cluster; c++) {
         u32 val = FatGetFatEntry(c);
         if (val == 0) {
             ntstatus status = FatSetFatEntry(c, eof);
             if (NT_ERROR(status)) return 0;
-            KdPrintf("[FAT] Allocated cluster %u\n", c);
+            g_last_allocated_cluster = c + 1;
+            return c;
+        }
+    }
+
+    // Wrap around and scan from 2 to start
+    for (u32 c = 2; c < start; c++) {
+        u32 val = FatGetFatEntry(c);
+        if (val == 0) {
+            ntstatus status = FatSetFatEntry(c, eof);
+            if (NT_ERROR(status)) return 0;
+            g_last_allocated_cluster = c + 1;
             return c;
         }
     }
@@ -1329,8 +1361,8 @@ ntstatus Fat32WriteFile(const char* path, const void* data, u32 size) {
     char short_name[11];
     FatGenerateShortName(filename, short_name);
 
-    KdPrintf("[FAT] WriteFile: path='%s' parent='%s' file='%s' size=%u\n",
-             path, parent_path, filename, size);
+    // KdPrintf("[FAT] WriteFile: path='%s' parent='%s' file='%s' size=%u\n",
+    //          path, parent_path, filename, size);
 
     u32 dir_cluster;
     if (parent_path[0] == 0) {
@@ -1466,19 +1498,13 @@ done_scan:
             u32 sector = FatClusterToSector(cluster);
 
             for (u32 s = 0; s < g_fat.sectors_per_cluster && remaining > 0; s++) {
-                ntstatus status = FatReadSector(sector + s, g_sector_buf);
-                if (NT_ERROR(status)) {
-                    FatFreeClusterChain(first_cluster);
-                    return status;
-                }
-
                 u32 to_write = remaining;
                 if (to_write > g_fat.bytes_per_sector) to_write = g_fat.bytes_per_sector;
                 RtMemCopy(g_sector_buf, src, to_write);
                 if (to_write < g_fat.bytes_per_sector)
                     RtMemSet(g_sector_buf + to_write, 0, g_fat.bytes_per_sector - to_write);
 
-                status = FatWriteSector(sector + s, g_sector_buf);
+                ntstatus status = FatWriteSector(sector + s, g_sector_buf);
                 if (NT_ERROR(status)) {
                     FatFreeClusterChain(first_cluster);
                     return status;
@@ -1522,7 +1548,7 @@ done_scan:
         return status;
     }
 
-    KdPrintf("[FAT] WriteFile: %s cluster=%u size=%u ok\n", filename, first_cluster, size);
+    // KdPrintf("[FAT] WriteFile: %s cluster=%u size=%u ok\n", filename, first_cluster, size);
     return STATUS_SUCCESS;
 }
 
@@ -1610,7 +1636,7 @@ ntstatus Fat32DeleteFile(const char* path) {
         if (NT_ERROR(status)) return status;
     }
 
-    KdPrintf("[FAT] DeleteFile: %s ok\n", filename);
+    // KdPrintf("[FAT] DeleteFile: %s ok\n", filename);
     return STATUS_SUCCESS;
 }
 
@@ -1658,7 +1684,7 @@ ntstatus Fat32CreateDirectory(const char* path) {
     char short_name[11];
     FatGenerateShortName(dirname, short_name);
 
-    KdPrintf("[FAT] CreateDirectory: path='%s' parent='%s' dir='%s'\n", path, parent_path, dirname);
+    // KdPrintf("[FAT] CreateDirectory: path='%s' parent='%s' dir='%s'\n", path, parent_path, dirname);
 
     u32 dir_cluster;
     if (parent_path[0] == 0) {
@@ -1728,6 +1754,24 @@ ntstatus Fat32CreateDirectory(const char* path) {
         return status;
     }
 
-    KdPrintf("[FAT] CreateDirectory: %s cluster=%u ok\n", dirname, new_cluster);
+    // KdPrintf("[FAT] CreateDirectory: %s cluster=%u ok\n", dirname, new_cluster);
     return STATUS_SUCCESS;
+}
+
+u64 Fat32GetVolumeSize(void) {
+    if (!g_fat_initialized) return 0;
+    return (u64)g_fat.total_sectors * g_fat.bytes_per_sector;
+}
+
+u64 Fat32GetFreeSize(void) {
+    if (!g_fat_initialized) return 0;
+    u32 data_sectors = g_fat.total_sectors - g_fat.data_start_sector;
+    u32 max_cluster = data_sectors / g_fat.sectors_per_cluster + 2;
+    u64 free_clusters = 0;
+    for (u32 c = 2; c < max_cluster; c++) {
+        if (FatGetFatEntry(c) == 0) {
+            free_clusters++;
+        }
+    }
+    return free_clusters * g_fat.sectors_per_cluster * g_fat.bytes_per_sector;
 }
