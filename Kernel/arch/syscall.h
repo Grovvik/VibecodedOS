@@ -7,6 +7,10 @@
 
 #define SYSCALL_INT 0x80
 
+#ifndef MICRONT_VERSION
+#define MICRONT_VERSION "0.5"
+#endif
+
 #define SYS_WRITE       1
 #define SYS_EXIT        2
 #define SYS_GETPID      3

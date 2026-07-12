@@ -397,7 +397,7 @@ __declspec(noinline) void SyscallIsrHandler(TrapFrame* frame) {
         case SYS_SYS_VERSION: {
             char* ubuf = (char*)SysUserPtr(frame->rcx);
             if (ubuf) {
-                RtStrCopy(ubuf, "MicroNT OS v0.4");
+                RtStrCopy(ubuf, MICRONT_VERSION);
             }
             ret = 0;
             break;
